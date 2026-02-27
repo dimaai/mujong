@@ -1,0 +1,93 @@
+/* FigurePanel.module.css */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 8px;
+  border: 2px solid;  /* color set via inline style in FigurePanel.tsx */
+  border-radius: 8px;
+  min-width: 72px;
+  gap: 8px;
+  transition: opacity 0.2s ease;
+}
+
+.name {
+  font-weight: 700;
+  font-size: 12px;
+  text-align: center;
+  letter-spacing: 0.03em;
+}
+
+.activeBadge {
+  font-size: 10px;
+}
+
+.figureList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+}
+
+/* ── Figure slots ──────────────────────────────────────── */
+
+.slot {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background-color: #3a7bd5;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  font-weight: 700;
+  font-size: 16px;
+  transition: filter 0.1s ease, box-shadow 0.1s ease;
+}
+
+/* available: show normally */
+.available {
+  cursor: default;
+}
+
+/* placed: still on the board — grey it out */
+.placed {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* taken: captured — grey it out (cross is added via .crossOut) */
+.taken {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.crossOut {
+  position: absolute;
+  font-size: 26px;
+  color: #e53e3e;
+  /* Center over the token circle */
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  line-height: 1;
+  pointer-events: none;
+}
+
+.slotSelected {
+  box-shadow: 0 0 0 3px #facc15;
+}
+
+.clickable {
+  cursor: pointer;
+}
+
+.clickable:hover {
+  filter: brightness(1.15);
+}
+
+.tokenLetter {
+  user-select: none;
+}

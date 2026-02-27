@@ -1,0 +1,52 @@
+/* GameCanvas.module.css */
+
+.canvas {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Thin colored bar above/below the board */
+.colorStrip {
+  width: 100%;
+  height: 10px;
+  border-radius: 4px;
+}
+
+/* Row containing both side panels and the board */
+.middle {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 12px 0;
+}
+
+.boardWrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.turnLabel {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.winnerBanner {
+  font-size: 22px;
+  font-weight: 700;
+  color: #2d7d32;
+  text-align: center;
+  padding: 4px 12px;
+  background: #e8f5e9;
+  border-radius: 6px;
+}
+
+.empty {
+  padding: 32px;
+  color: #888;
+  font-style: italic;
+}

@@ -1,0 +1,74 @@
+/* Board.module.css
+ *
+ * CSS Modules: class names here are scoped to Board.tsx automatically.
+ * Next.js transforms `.board` into something like `.Board_board__xyz`
+ * so it never clashes with other components' CSS.
+ */
+
+.board {
+  display: grid;
+  /* Grid template columns/rows are set dynamically via inline style in Board.tsx */
+  border: 2px solid #333;
+  width: fit-content;
+  /* Slightly rounded corners soften the overall board look */
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.cell {
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  position: relative;
+  transition: background-color 0.1s ease;
+}
+
+/* Classic checkerboard colours */
+.cellLight { background-color: #f0d9b5; }
+.cellDark  { background-color: #b58863; }
+
+/* Green overlay when this square is a valid move destination */
+.cellHighlighted {
+  background-color: rgba(0, 200, 80, 0.45) !important;
+}
+
+/* Yellow outline when this cell holds the selected piece */
+.cellSelected {
+  outline: 3px solid #facc15;
+  outline-offset: -3px;
+}
+
+/* ── Figure tokens ─────────────────────────────────────── */
+
+.token {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 18px;
+  user-select: none;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+/* Current player's pieces use a vivid blue */
+.tokenOwned {
+  background-color: #3a7bd5;
+}
+
+/* Opponent's pieces use a muted red */
+.tokenOpponent {
+  background-color: #c0392b;
+}
+
+/* Glow ring when this token is selected */
+.tokenSelected {
+  box-shadow: 0 0 0 3px #facc15;
+  transform: scale(1.08);
+}
