@@ -22,7 +22,7 @@ export const LEVELS: Level[] = [
     // Each player gets 3 Walkers and 1 Runner.
     // Simple set so you can learn placement and basic movement.
     allowedFigures: [
-      { figureTypeId: 'ft_walker', quantity: 3 },
+      { figureTypeId: 'ft_slon', quantity: 3 },
       { figureTypeId: 'ft_runner', quantity: 1 },
     ],
     player1Color: '#4A90D9', // blue
@@ -36,9 +36,9 @@ export const LEVELS: Level[] = [
     boardWidth: 8,
     boardHeight: 8,
     allowedFigures: [
-      { figureTypeId: 'ft_walker', quantity: 4 },
+      { figureTypeId: 'ft_slon', quantity: 1 },
       { figureTypeId: 'ft_runner', quantity: 2 },
-      { figureTypeId: 'ft_strider', quantity: 1 },
+      { figureTypeId: 'ft_cross', quantity: 2 },
     ],
     player1Color: '#4A90D9',
     player2Color: '#D94A4A',
@@ -48,13 +48,13 @@ export const LEVELS: Level[] = [
     levelNumber: 3,
     levelName: 'Advanced',
     // Wider board — encourages horizontal planning.
-    boardWidth: 10,
-    boardHeight: 8,
+    boardWidth: 5,
+    boardHeight: 11,
     allowedFigures: [
-      { figureTypeId: 'ft_walker', quantity: 4 },
+      { figureTypeId: 'ft_slon', quantity: 2 },
       { figureTypeId: 'ft_runner', quantity: 2 },
-      { figureTypeId: 'ft_strider', quantity: 2 },
-      { figureTypeId: 'ft_leaper', quantity: 1 },
+      { figureTypeId: 'ft_cross', quantity: 1 },
+      // { figureTypeId: 'ft_ziraf', quantity: 1 },
     ],
     player1Color: '#2E7D32', // green
     player2Color: '#6A1B9A', // purple

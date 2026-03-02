@@ -79,6 +79,7 @@ export function FigurePanel({
             instance={instance}
             isSelected={instance.instanceId === selectedInstanceId}
             isActive={isActive}
+            playerColor={playerColor}
             onClick={() => {
               // Only available pieces on the active player's turn are clickable.
               if (isActive && instance.status === 'available') {
@@ -98,6 +99,7 @@ interface FigureSlotProps {
   instance: PlayerFigureInstance;
   isSelected: boolean;
   isActive: boolean;
+  playerColor: string;
   onClick: () => void;
 }
 
@@ -109,7 +111,7 @@ interface FigureSlotProps {
  * Outputs: fires onClick
  * Side effects: none
  */
-function FigureSlot({ instance, isSelected, isActive, onClick }: FigureSlotProps) {
+function FigureSlot({ instance, isSelected, isActive, playerColor, onClick }: FigureSlotProps) {
   const figureType = FIGURE_TYPE_MAP[instance.figureTypeId];
 
   // Pick the CSS class that matches the figure's lifecycle state.
@@ -132,6 +134,7 @@ function FigureSlot({ instance, isSelected, isActive, onClick }: FigureSlotProps
       ]
         .filter(Boolean)
         .join(' ')}
+      style={{ backgroundColor: playerColor}}
       onClick={onClick}
       title={
         figureType

@@ -28,8 +28,8 @@ interface BoardProps {
   level: Level;
   /** All figure instances in the game (placed and unplaced). */
   figures: PlayerFigureInstance[];
-  /** ID of the player whose turn it currently is. */
-  currentPlayerId: string;
+  /** Maps each playerId to its CSS color string — used to color tokens by owner. */
+  playerColors: Record<string, string>;
   /** The instanceId of the currently selected figure, or null if none. */
   selectedInstanceId: string | null;
   /** Squares highlighted as valid destinations for the selected figure. */
@@ -52,7 +52,7 @@ interface BoardProps {
 export function Board({
   level,
   figures,
-  currentPlayerId,
+  playerColors,
   selectedInstanceId,
   validMoveTargets,
   onCellClick,
@@ -63,7 +63,16 @@ export function Board({
   // Convert the validMoveTargets array to a Set of "col,row" strings.
   // Set.has() is O(1) — faster than scanning an array for every cell.
   const targetSet = new Set(validMoveTargets.map((p) => `${p.col},${p.row}`));
+  // Map from column → exact winning Position for top zone (row < 0)
+  const topWinByCol = new Map<number, Position>();
+  // Map from column → exact winning Position for bottom zone (row >= boardHeight)
+  const bottomWinByCol = new Map<number, Position>();
 
+  for (const pos of validMoveTargets) {
+    if (pos.row < 0) topWinByCol.set(pos.col, pos);
+    if (pos.row >= boardHeight) bottomWinByCol.set(pos.col, pos);
+  }
+  
   const cells: React.ReactNode[] = [];
 
   // Build cells row by row, column by column (top-left to bottom-right).
@@ -89,7 +98,7 @@ export function Board({
             .filter(Boolean)
             .join(' ')}
           onClick={() => {
-            if (figure) {
+            if (figure && !isHighlighted) {
               // Clicked a piece — delegate to parent for selection logic.
               onFigureClick(figure.instanceId);
             } else {
@@ -102,7 +111,8 @@ export function Board({
             <FigureToken
               instance={figure}
               isSelected={isSelected}
-              isCurrentPlayerOwned={figure.playerId === currentPlayerId}
+              // isCurrentPlayerOwned={figure.playerId === currentPlayerId}
+              color={playerColors[figure.playerId] ?? '#888'}
             />
           )}
         </div>,
@@ -110,17 +120,70 @@ export function Board({
     }
   }
 
+  // Build finish zone rows — one cell per column, clickable only when a
+  // winning move lands in that column.
+  const topZone = Array.from({ length: boardWidth }, (_, col) => {
+    const winPos = topWinByCol.get(col);
+    return (
+      <div
+        key={`top-finish-${col}`}
+        className={[styles.finishCell, winPos ? styles.cellWinTarget : '']
+          .filter(Boolean)
+          .join(' ')}
+        onClick={() => winPos && onCellClick(winPos)}
+      />
+    );
+  });
+
+  const bottomZone = Array.from({ length: boardWidth }, (_, col) => {
+    const winPos = bottomWinByCol.get(col);
+    return (
+      <div
+        key={`bottom-finish-${col}`}
+        className={[styles.finishCell, winPos ? styles.cellWinTarget : '']
+          .filter(Boolean)
+          .join(' ')}
+        onClick={() => winPos && onCellClick(winPos)}
+      />
+    );
+  });
+
   return (
-    <div
-      className={styles.board}
-      style={{
-        // CSS custom properties drive the grid size dynamically.
-        // gridTemplateColumns: "repeat(6, 1fr)" creates 6 equal columns.
-        gridTemplateColumns: `repeat(${boardWidth}, 1fr)`,
-        gridTemplateRows: `repeat(${boardHeight}, 1fr)`,
-      }}
-    >
-      {cells}
+    <div className={styles.boardOuter}>
+      {/* Top finish zone — Player 1 (bottom player) wins by crossing here */}
+      <div
+        className={styles.finishZone}
+        style={{
+          gridTemplateColumns: `repeat(${boardWidth}, 1fr)`,
+          backgroundColor: level.player1Color,
+        }}
+        title={`${level.player1Color} goal`}
+      >
+        {topZone}
+      </div>
+
+      {/* Main board grid */}
+      <div
+        className={styles.board}
+        style={{
+          gridTemplateColumns: `repeat(${boardWidth}, 1fr)`,
+          gridTemplateRows: `repeat(${boardHeight}, 1fr)`,
+        }}
+      >
+        {cells}
+      </div>
+
+      {/* Bottom finish zone — Player 2 (top player) wins by crossing here */}
+      <div
+        className={styles.finishZone}
+        style={{
+          gridTemplateColumns: `repeat(${boardWidth}, 1fr)`,
+          backgroundColor: level.player2Color,
+        }}
+        title={`${level.player2Color} goal`}
+      >
+        {bottomZone}
+      </div>
     </div>
   );
 }
@@ -130,8 +193,8 @@ export function Board({
 interface FigureTokenProps {
   instance: PlayerFigureInstance;
   isSelected: boolean;
-  /** True when this piece belongs to whoever's turn it is. */
-  isCurrentPlayerOwned: boolean;
+  /** Owner's player color — stable for the lifetime of the piece. */
+  color: string;
 }
 
 /**
@@ -143,18 +206,15 @@ interface FigureTokenProps {
  * Outputs: none (purely visual)
  * Side effects: none
  */
-function FigureToken({ instance, isSelected, isCurrentPlayerOwned }: FigureTokenProps) {
+function FigureToken({ instance, isSelected, color }: FigureTokenProps) {
   const figureType = FIGURE_TYPE_MAP[instance.figureTypeId];
 
   return (
     <div
-      className={[
-        styles.token,
-        isCurrentPlayerOwned ? styles.tokenOwned : styles.tokenOpponent,
-        isSelected ? styles.tokenSelected : '',
-      ]
+      className={[styles.token, isSelected ? styles.tokenSelected : '']
         .filter(Boolean)
         .join(' ')}
+      style={{ backgroundColor: color }}
       title={figureType?.name ?? instance.figureTypeId}
     >
       {/* First letter of the type name — "W" for Walker, "R" for Runner, etc. */}

@@ -22,11 +22,11 @@ import type { FigureType } from '../domain/types';
  */
 export const FIGURE_TYPES: FigureType[] = [
   {
-    id: 'ft_walker',
-    name: 'Walker',
+    id: 'ft_slon',
+    name: 'Slon',
     // Moves exactly 1 square in any cardinal direction.
     // The simplest piece — good for beginners to learn with.
-    movement: { vertical: 1, horizontal: 1, diagonal: 0 },
+    movement: { vertical: 0, horizontal: 0, diagonal: 1 },
     canJump: false,
   },
   {
@@ -35,20 +35,20 @@ export const FIGURE_TYPES: FigureType[] = [
     // Moves up to 3 squares vertically only.
     // A "fast lane" piece — great for rushing toward the goal
     // but cannot sidestep obstacles.
-    movement: { vertical: 3, horizontal: 0, diagonal: 0 },
+    movement: { vertical: 2, horizontal: 2, diagonal: 0 },
     canJump: false,
   },
   {
-    id: 'ft_strider',
-    name: 'Strider',
+    id: 'ft_cross',
+    name: 'Cross',
     // Moves up to 2 squares in ALL directions including diagonal.
     // The most versatile piece — use sparingly at higher levels.
-    movement: { vertical: 2, horizontal: 2, diagonal: 2 },
+    movement: { vertical: 1, horizontal: 1, diagonal: 0 },
     canJump: false,
   },
   {
-    id: 'ft_leaper',
-    name: 'Leaper',
+    id: 'ft_ziraf',
+    name: 'Ziraf',
     // Moves up to 2 vertical or 1 horizontal AND can jump over pieces.
     // Useful for escaping tight situations where other pieces are blocked.
     movement: { vertical: 2, horizontal: 1, diagonal: 0 },

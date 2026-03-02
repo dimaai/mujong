@@ -113,23 +113,21 @@ export function GameCanvas() {
       selectFigure(instanceId);
     }
   }
+  
+  const PlayerColors: Record<string, string> = {
+    [players[0].id]: level.player1Color,
+    [players[1].id]: level.player2Color,
+  };
 
   return (
     <div className={styles.canvas}>
-      {/* ── Top color strip (Player 2's accent color) ────────── */}
-      <div
-        className={styles.colorStrip}
-        style={{ backgroundColor: level.player2Color }}
-        title={`${players[1].name}'s side`}
-      />
-
       {/* ── Middle row: panels + board ───────────────────────── */}
       <div className={styles.middle}>
         {/* Left panel: Player 1's figures */}
         <FigurePanel
           playerId={players[0].id}
           playerName={players[0].name}
-          playerColor={level.player1Color}
+          playerColor={PlayerColors[players[0].id]}
           figures={figures}
           isActive={currentPlayerIndex === 0 && phase === 'playing'}
           selectedInstanceId={selectedInstanceId}
@@ -151,7 +149,7 @@ export function GameCanvas() {
           <Board
             level={level}
             figures={figures}
-            currentPlayerId={currentPlayer.id}
+            playerColors={PlayerColors}
             selectedInstanceId={selectedInstanceId}
             validMoveTargets={validMoveTargets}
             onCellClick={handleCellClick}
@@ -171,12 +169,6 @@ export function GameCanvas() {
         />
       </div>
 
-      {/* ── Bottom color strip (Player 1's accent color) ─────── */}
-      <div
-        className={styles.colorStrip}
-        style={{ backgroundColor: level.player1Color }}
-        title={`${players[0].name}'s side`}
-      />
     </div>
   );
 }

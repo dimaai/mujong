@@ -160,38 +160,22 @@ export function getValidMoves(
 
   // ── Vertical rays (up = row decreases, down = row increases) ─
   if (movement.vertical > 0) {
-    for (let d = 1; d <= movement.vertical; d++) {
-      if (!tryAdd(col, row - d) && !canJump) break; // up
-    }
-    for (let d = 1; d <= movement.vertical; d++) {
-      if (!tryAdd(col, row + d) && !canJump) break; // down
-    }
+     tryAdd(col, row - movement.vertical); // up
+     tryAdd(col, row + movement.vertical); // down
   }
 
   // ── Horizontal rays ───────────────────────────────────────────
   if (movement.horizontal > 0) {
-    for (let d = 1; d <= movement.horizontal; d++) {
-      if (!tryAdd(col - d, row) && !canJump) break; // left
-    }
-    for (let d = 1; d <= movement.horizontal; d++) {
-      if (!tryAdd(col + d, row) && !canJump) break; // right
-    }
+      tryAdd(col - movement.horizontal, row); // left
+      tryAdd(col + movement.horizontal, row); // right
   }
 
   // ── Diagonal rays (all four corners) ─────────────────────────
   if (movement.diagonal > 0) {
-    // [deltaCol, deltaRow] pairs for each diagonal direction.
-    const directions: [number, number][] = [
-      [-1, -1], // up-left
-      [1, -1],  // up-right
-      [-1, 1],  // down-left
-      [1, 1],   // down-right
-    ];
-    for (const [dc, dr] of directions) {
-      for (let d = 1; d <= movement.diagonal; d++) {
-        if (!tryAdd(col + dc * d, row + dr * d) && !canJump) break;
-      }
-    }
+    tryAdd(col + movement.diagonal, row + movement.diagonal);
+    tryAdd(col - movement.diagonal, row + movement.diagonal);
+    tryAdd(col + movement.diagonal, row - movement.diagonal);
+    tryAdd(col - movement.diagonal, row - movement.diagonal);
   }
 
   return valid;
