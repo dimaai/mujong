@@ -18,7 +18,7 @@
 import React from 'react';
 import type { Position, PlayerFigureInstance, Level } from '../../domain/types';
 import { getFigureAt } from '../../domain/board';
-import { FIGURE_TYPE_MAP } from '../../data/figuretypes';
+import { FigureIcon } from '../figures/FigureIcon';
 import styles from './Board.module.css';
 
 // ── Props ─────────────────────────────────────────────────────
@@ -30,6 +30,8 @@ interface BoardProps {
   figures: PlayerFigureInstance[];
   /** Maps each playerId to its CSS color string — used to color tokens by owner. */
   playerColors: Record<string, string>;
+  /** Side length of each cell in pixels — computed by GameCanvas via ResizeObserver. */
+  cellSize?: number;
   /** The instanceId of the currently selected figure, or null if none. */
   selectedInstanceId: string | null;
   /** Squares highlighted as valid destinations for the selected figure. */
@@ -53,6 +55,7 @@ export function Board({
   level,
   figures,
   playerColors,
+  cellSize = 64,
   selectedInstanceId,
   validMoveTargets,
   onCellClick,
@@ -111,8 +114,8 @@ export function Board({
             <FigureToken
               instance={figure}
               isSelected={isSelected}
-              // isCurrentPlayerOwned={figure.playerId === currentPlayerId}
               color={playerColors[figure.playerId] ?? '#888'}
+              iconSize={Math.max(16, cellSize - 6)}
             />
           )}
         </div>,
@@ -149,7 +152,11 @@ export function Board({
   });
 
   return (
-    <div className={styles.boardOuter}>
+    <div
+      className={styles.boardOuter}
+      // --cell-size is consumed by .cell and .finishCell in Board.module.css
+      style={{ '--cell-size': `${cellSize}px` } as React.CSSProperties}
+    >
       {/* Top finish zone — Player 1 (bottom player) wins by crossing here */}
       <div
         className={styles.finishZone}
@@ -195,30 +202,24 @@ interface FigureTokenProps {
   isSelected: boolean;
   /** Owner's player color — stable for the lifetime of the piece. */
   color: string;
+  /** SVG icon diameter in px — scales with cell size. */
+  iconSize: number;
 }
 
 /**
- * FigureToken renders a single piece on the board.
- * Shows the first letter of the figure type as a placeholder
- * until real SVG/PNG skins are added to /public/skins/.
+ * FigureToken renders a single piece on the board using the SVG FigureIcon.
  *
- * Inputs:  instance, isSelected, isCurrentPlayerOwned
+ * Inputs:  instance, isSelected, color, iconSize
  * Outputs: none (purely visual)
  * Side effects: none
  */
-function FigureToken({ instance, isSelected, color }: FigureTokenProps) {
-  const figureType = FIGURE_TYPE_MAP[instance.figureTypeId];
-
+function FigureToken({ instance, isSelected, color, iconSize }: FigureTokenProps) {
   return (
-    <div
-      className={[styles.token, isSelected ? styles.tokenSelected : '']
-        .filter(Boolean)
-        .join(' ')}
-      style={{ backgroundColor: color }}
-      title={figureType?.name ?? instance.figureTypeId}
-    >
-      {/* First letter of the type name — "W" for Walker, "R" for Runner, etc. */}
-      {figureType?.name?.charAt(0) ?? '?'}
-    </div>
+    <FigureIcon
+      figureTypeId={instance.figureTypeId}
+      color={color}
+      size={iconSize}
+      selected={isSelected}
+    />
   );
 }

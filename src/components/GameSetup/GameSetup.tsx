@@ -55,19 +55,15 @@ export function GameSetup() {
   }
 
   // If a game is already running, render the full game view.
+  // The "New Game" and "Give Up" buttons live inside GameCanvas now.
   if (game) {
-    return (
-      <div>
-        <button className={styles.backButton} onClick={resetGame}>
-          ← New Game
-        </button>
-        <GameCanvas />
-      </div>
-    );
+    return <GameCanvas />;
   }
 
-  // Otherwise render the setup form.
+  // Otherwise render the setup form with the game title.
   return (
+    <div className={styles.setupWrapper}>
+      <h1 className={styles.title}>Mujong</h1>
     <div className={styles.form}>
       <div className={styles.field}>
         <label htmlFor="levelSelect">Level</label>
@@ -110,6 +106,7 @@ export function GameSetup() {
       <button className={styles.startButton} onClick={handleStart}>
         Start Game
       </button>
+    </div>
     </div>
   );
 }

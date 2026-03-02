@@ -17,6 +17,7 @@
 import React from 'react';
 import type { PlayerFigureInstance } from '../../domain/types';
 import { FIGURE_TYPE_MAP } from '../../data/figuretypes';
+import { FigureIcon } from '../figures/FigureIcon';
 import styles from './FigurePanel.module.css';
 
 // ── Props ─────────────────────────────────────────────────────
@@ -134,7 +135,6 @@ function FigureSlot({ instance, isSelected, isActive, playerColor, onClick }: Fi
       ]
         .filter(Boolean)
         .join(' ')}
-      style={{ backgroundColor: playerColor}}
       onClick={onClick}
       title={
         figureType
@@ -142,8 +142,12 @@ function FigureSlot({ instance, isSelected, isActive, playerColor, onClick }: Fi
           : instance.figureTypeId
       }
     >
-      {/* First letter of the type name — same as on the board */}
-      <span className={styles.tokenLetter}>{figureType?.name?.charAt(0) ?? '?'}</span>
+      <FigureIcon
+        figureTypeId={instance.figureTypeId}
+        color={playerColor}
+        size={44}
+        selected={isSelected}
+      />
 
       {/* Crossed-out overlay for captured pieces */}
       {instance.status === 'taken' && (

@@ -142,7 +142,7 @@ export type TurnAction =
   | { type: 'MOVE'; instanceId: string; from: Position; to: Position };
 
 /** The high-level phase of the game session. */
-export type GamePhase = 'playing' | 'finished';
+export type GamePhase = 'playing' | 'finished' | 'draw';
 
 /**
  * The complete runtime state of a game session.
@@ -170,4 +170,10 @@ export interface GameState {
   turnNumber: number;
   /** Full log of every action taken — enables undo and replay. */
   history: TurnAction[];
+  /**
+   * Hashes of every board position reached during the game.
+   * Each entry encodes whose turn it is + all placed-figure positions.
+   * Used for threefold-repetition draw detection.
+   */
+  positionHashes: string[];
 }

@@ -18,7 +18,7 @@
 
 'use client';
 
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useGameStore } from '../../store/gameStore';
 import { Board } from '../Board/Board';
 import { FigurePanel } from '../FigurePanel/FigurePanel';
@@ -44,6 +44,8 @@ export function GameCanvas() {
     selectAvailableFigure,
     executeAction,
     resetSelection,
+    resetGame,
+    forfeit,
   } = useGameStore();
 
   // If no game is running, show a placeholder (GameSetup handles this case).
@@ -54,8 +56,68 @@ export function GameCanvas() {
   const { level, players, currentPlayerIndex, figures, phase, winnerId } = game;
   const currentPlayer = players[currentPlayerIndex];
 
+  // ── Responsive cell size ──────────────────────────────────
+  // window.innerWidth/Height are the only values guaranteed to change in
+  // BOTH directions for any resize. Element-based observers miss expansions
+  // when the observed element's width is content-driven (not layout-driven).
+  //
+  // Reserved space deductions:
+  //   height: 48px  — turn label (~20px) + canvas padding (16px) + gaps
+  //   width:  220px — two side panels (≈2×88px) + gaps (2×16px) + margins
+  //
+  // The finish zones add 0.28 of a cell above AND below the board (total +0.56),
+  // so total board height in cells = boardHeight + 0.56.
+  const [cellSize, setCellSize] = useState(64);
+
+  useEffect(() => {
+    const compute = () => {
+      const availH = window.innerHeight - 48;
+      const availW = window.innerWidth  - 220;
+      const fromHeight = Math.floor(availH / (level.boardHeight + 0.56));
+      const fromWidth  = Math.floor(availW / level.boardWidth);
+      setCellSize(Math.max(24, Math.min(fromHeight, fromWidth)));
+    };
+
+    compute();
+    window.addEventListener('resize', compute);
+    return () => window.removeEventListener('resize', compute);
+  }, [level.boardWidth, level.boardHeight]);
+  // ────────────────────────────────────────────────────────────
+
+  // ── Timer ─────────────────────────────────────────────────
+  // Starts on the first move (history.length > 0), stops when the game ends.
+  // intervalRef holds the setInterval ID so we can clear it on demand.
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    if (game.history.length > 0 && phase === 'playing' && !intervalRef.current) {
+      intervalRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
+    }
+    if (phase !== 'playing' && intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  }, [game.history.length, phase]);
+
+  // Clear on unmount (e.g. New Game / Give Up resets the store, unmounting this component).
+  useEffect(() => {
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, []);
+  // ────────────────────────────────────────────────────────────
+
   /**
-   * handleCellClick is called when the user clicks an empty (or highlighted) cell.
+   * formatTime turns elapsed seconds into a MM:SS string.
+   */
+  function formatTime(seconds: number): string {
+    const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+    const s = (seconds % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  }
+
+  /** is called when the user clicks an empty (or highlighted) cell.
    *
    * Flow:
    *   1. If nothing is selected, do nothing.
@@ -121,24 +183,44 @@ export function GameCanvas() {
 
   return (
     <div className={styles.canvas}>
-      {/* ── Middle row: panels + board ───────────────────────── */}
+      {/* ── Middle row: left col + board + right col ────────── */}
       <div className={styles.middle}>
-        {/* Left panel: Player 1's figures */}
-        <FigurePanel
-          playerId={players[0].id}
-          playerName={players[0].name}
-          playerColor={PlayerColors[players[0].id]}
-          figures={figures}
-          isActive={currentPlayerIndex === 0 && phase === 'playing'}
-          selectedInstanceId={selectedInstanceId}
-          onSelectFigure={selectAvailableFigure}
-        />
 
-        {/* Center: board + optional winner banner */}
+        {/* ── Left column: New Game + Player 1 panel + Give Up ── */}
+        <div className={styles.sideCol}>
+          <button className={styles.newGameBtn} onClick={resetGame}>
+            ← New Game
+          </button>
+          <FigurePanel
+            playerId={players[0].id}
+            playerName={players[0].name}
+            playerColor={PlayerColors[players[0].id]}
+            figures={figures}
+            isActive={currentPlayerIndex === 0 && phase === 'playing'}
+            selectedInstanceId={selectedInstanceId}
+            onSelectFigure={selectAvailableFigure}
+          />
+          {phase === 'playing' && (
+            <button
+              className={styles.giveUpBtn}
+              style={{ color: PlayerColors[players[0].id], borderColor: PlayerColors[players[0].id] }}
+              onClick={() => forfeit(players[0].id)}
+            >
+              Give up
+            </button>
+          )}
+        </div>
+
+        {/* ── Center: board + optional winner banner ─────────── */}
         <div className={styles.boardWrapper}>
           {phase === 'finished' && winnerId && (
             <div className={styles.winnerBanner}>
               🏆 {players.find((p) => p.id === winnerId)?.name} wins!
+            </div>
+          )}
+          {phase === 'draw' && (
+            <div className={styles.drawBanner}>
+              🤝 Draw — repeated moves
             </div>
           )}
           {phase === 'playing' && (
@@ -150,6 +232,7 @@ export function GameCanvas() {
             level={level}
             figures={figures}
             playerColors={PlayerColors}
+            cellSize={cellSize}
             selectedInstanceId={selectedInstanceId}
             validMoveTargets={validMoveTargets}
             onCellClick={handleCellClick}
@@ -157,18 +240,35 @@ export function GameCanvas() {
           />
         </div>
 
-        {/* Right panel: Player 2's figures */}
-        <FigurePanel
-          playerId={players[1].id}
-          playerName={players[1].name}
-          playerColor={level.player2Color}
-          figures={figures}
-          isActive={currentPlayerIndex === 1 && phase === 'playing'}
-          selectedInstanceId={selectedInstanceId}
-          onSelectFigure={selectAvailableFigure}
-        />
-      </div>
+        {/* ── Right column: Timer + Player 2 panel + Give Up ─── */}
+        <div className={styles.sideCol}>
+          <div
+            className={styles.timer}
+            style={{ color: PlayerColors[players[1].id] }}
+          >
+            {formatTime(elapsed)}
+          </div>
+          <FigurePanel
+            playerId={players[1].id}
+            playerName={players[1].name}
+            playerColor={PlayerColors[players[1].id]}
+            figures={figures}
+            isActive={currentPlayerIndex === 1 && phase === 'playing'}
+            selectedInstanceId={selectedInstanceId}
+            onSelectFigure={selectAvailableFigure}
+          />
+          {phase === 'playing' && (
+            <button
+              className={styles.giveUpBtn}
+              style={{ color: PlayerColors[players[1].id], borderColor: PlayerColors[players[1].id] }}
+              onClick={() => forfeit(players[1].id)}
+            >
+              Give up
+            </button>
+          )}
+        </div>
 
+      </div>
     </div>
   );
 }

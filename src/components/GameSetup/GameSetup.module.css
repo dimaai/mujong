@@ -1,5 +1,20 @@
 /* GameSetup.module.css */
 
+/* Wrapper for the pre-game setup screen — centers content and adds spacing */
+.setupWrapper {
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  min-height: 100vh;
+}
+
+.title {
+  font-size: 28px;
+  font-weight: 700;
+}
+
 .form {
   display: flex;
   flex-direction: column;

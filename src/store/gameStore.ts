@@ -26,14 +26,30 @@ import { FIGURE_TYPE_MAP } from '../data/figuretypes';
 import { createInitialFigures, getFigureAt } from '../domain/board';
 import { getValidMoves, getValidPlacements, isWinningMove } from '../domain/rules';
 
+// ── Position key for threefold-repetition ─────────────────────
+// Encodes whose turn it is + every placed figure's position into a
+// single comparable string. Two keys are equal ⟺ the board state
+// (and side to move) is identical.
+function computePositionKey(
+  figures: PlayerFigureInstance[],
+  currentPlayerIndex: 0 | 1,
+): string {
+  const placed = figures
+    .filter((f) => f.status === 'placed')
+    .map((f) => `${f.instanceId}:${f.position!.col},${f.position!.row}`)
+    .sort()
+    .join('|');
+  return `${currentPlayerIndex};${placed}`;
+}
+
 // ── Skin defaults ─────────────────────────────────────────────
 // Maps figureTypeId → the skinId each type uses by default.
 // When level-specific skins are added, this map will be overridden.
 const DEFAULT_SKIN_MAP: Record<string, string> = {
-  ft_walker: 'skin_default_blue',
+  ft_slon: 'skin_default_blue',
   ft_runner: 'skin_default_blue',
-  ft_strider: 'skin_default_blue',
-  ft_leaper: 'skin_default_blue',
+  ft_cross: 'skin_default_blue',
+  ft_ziraf: 'skin_default_blue',
 };
 
 // ── Store shape ───────────────────────────────────────────────
@@ -84,6 +100,12 @@ interface GameStore {
   /** Clears selection and valid-move highlights without changing game state. */
   resetSelection: () => void;
 
+  /**
+   * A player forfeits — the opponent wins.
+   * @param playerId - the id of the player who gives up
+   */
+  forfeit: (playerId: string) => void;
+
   /** Tears down the current game so the setup screen is shown again. */
   resetGame: () => void;
 }
@@ -110,6 +132,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       winnerId: null,
       turnNumber: 1,
       history: [],
+      positionHashes: [computePositionKey(figures, 0)],
     };
 
     set({ game: newGame, selectedInstanceId: null, validMoveTargets: [] });
@@ -215,6 +238,25 @@ export const useGameStore = create<GameStore>((set, get) => ({
     // TypeScript infers `0 | 1` here because of the explicit type annotation.
     const nextPlayerIndex: 0 | 1 = game.currentPlayerIndex === 0 ? 1 : 0;
 
+    const updatedHistory = [...game.history, action];
+
+    // ── Threefold repetition draw detection ────────────────────
+    // Compute a position key from the new board state + next player.
+    // If the same position has occurred 3 times during the game, it's a draw.
+    const posKey = computePositionKey(
+      updatedFigures,
+      phase === 'finished' ? game.currentPlayerIndex : nextPlayerIndex,
+    );
+    const updatedHashes = [...game.positionHashes, posKey];
+
+    if (phase === 'playing') {
+      const count = updatedHashes.filter((h) => h === posKey).length;
+      if (count >= 3) {
+        phase = 'draw';
+      }
+    }
+    // ──────────────────────────────────────────────────────────
+
     set({
       game: {
         ...game,
@@ -225,7 +267,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
         winnerId,
         turnNumber: game.turnNumber + 1,
         // Append the action to the history log (enables future undo/replay).
-        history: [...game.history, action],
+        history: updatedHistory,
+        positionHashes: updatedHashes,
       },
       selectedInstanceId: null,
       validMoveTargets: [],
@@ -233,5 +276,20 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   resetSelection: () => set({ selectedInstanceId: null, validMoveTargets: [] }),
+
+  forfeit: (playerId) => {
+    const { game } = get();
+    if (!game || game.phase !== 'playing') return;
+
+    // The opponent of whoever forfeited wins.
+    const opponentId = game.players.find((p) => p.id !== playerId)?.id ?? null;
+
+    set({
+      game: { ...game, phase: 'finished', winnerId: opponentId },
+      selectedInstanceId: null,
+      validMoveTargets: [],
+    });
+  },
+
   resetGame: () => set({ game: null, selectedInstanceId: null, validMoveTargets: [] }),
 }));

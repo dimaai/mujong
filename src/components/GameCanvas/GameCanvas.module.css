@@ -4,6 +4,9 @@
   display: flex;
   flex-direction: column;
   align-items: center;
+  height: 100dvh;
+  padding: 8px 0;
+  overflow: hidden;
 }
 
 /* Thin colored bar above/below the board */
@@ -19,14 +22,24 @@
   flex-direction: row;
   align-items: flex-start;
   gap: 16px;
-  padding: 12px 0;
+  padding: 4px 0;
+  /* flex: 1 makes this row consume all remaining vertical space;
+     min-height: 0 allows it to shrink below its content height (critical for flex children). */
+  flex: 1;
+  min-height: 0;
 }
 
 .boardWrapper {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  /* align-self: stretch makes this element fill .middle's full height via the
+     flex algorithm — not via content size. This means ResizeObserver fires in
+     both directions (shrink AND expand) because the element size is always
+     driven by layout, never by its own content. */
+  align-self: stretch;
+  min-height: 0;
 }
 
 .turnLabel {
@@ -45,8 +58,67 @@
   border-radius: 6px;
 }
 
+.drawBanner {
+  font-size: 22px;
+  font-weight: 700;
+  color: #7b6c00;
+  text-align: center;
+  padding: 4px 12px;
+  background: #fff8e1;
+  border-radius: 6px;
+}
+
 .empty {
   padding: 32px;
   color: #888;
   font-style: italic;
+}
+
+/* ── Side columns (left: New Game + P1; right: Timer + P2) ── */
+
+.sideCol {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.newGameBtn {
+  white-space: nowrap;
+  padding: 6px 14px;
+  background: none;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.newGameBtn:hover {
+  background: #f0f0f0;
+}
+
+/* MM:SS timer above Player 2's panel */
+.timer {
+  font-size: 22px;
+  font-weight: 700;
+  font-family: monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.05em;
+  padding: 2px 0;
+}
+
+.giveUpBtn {
+  white-space: nowrap;
+  padding: 6px 14px;
+  background: none;
+  border: 1px solid;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.giveUpBtn:hover {
+  opacity: 0.65;
 }

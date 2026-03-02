@@ -28,16 +28,7 @@ import { GameSetup } from '../components/GameSetup/GameSetup';
  */
 export default function HomePage() {
   return (
-    <main
-      style={{
-        padding: '32px',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: '24px',
-      }}
-    >
-      <h1 style={{ fontSize: '28px', fontWeight: 700 }}>Mujong</h1>
+    <main>
       {/*
        * GameSetup handles both the pre-game form and the live GameCanvas.
        * It reads `game` from Zustand: null → show form, non-null → show board.

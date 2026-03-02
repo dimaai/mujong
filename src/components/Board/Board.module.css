@@ -16,8 +16,9 @@
 }
 
 .cell {
-  width: 64px;
-  height: 64px;
+  /* Size is driven by --cell-size, computed in GameCanvas and set on .boardOuter */
+  width: var(--cell-size, 64px);
+  height: var(--cell-size, 64px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -52,8 +53,8 @@
 
 /* One cell in the finish zone — same width as a board cell, shorter height */
 .finishCell {
-  width: 64px;
-  height: 20px;
+  width: var(--cell-size, 64px);
+  height: calc(var(--cell-size, 64px) * 0.28);
   cursor: default;
 }
 
