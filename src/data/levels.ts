@@ -22,11 +22,13 @@ export const LEVELS: Level[] = [
     // Each player gets 3 Walkers and 1 Runner.
     // Simple set so you can learn placement and basic movement.
     allowedFigures: [
-      { figureTypeId: 'ft_slon', quantity: 3 },
-      { figureTypeId: 'ft_runner', quantity: 1 },
+      { figureTypeId: 'ft_slon', quantity: 2 },
+      { figureTypeId: 'ft_runner', quantity: 2 },
+      { figureTypeId: 'ft_cross', quantity: 1 },
     ],
     player1Color: '#4A90D9', // blue
     player2Color: '#D94A4A', // red
+    timerMinutes: 5,
   },
   {
     levelId: 'level_2',
@@ -42,6 +44,7 @@ export const LEVELS: Level[] = [
     ],
     player1Color: '#4A90D9',
     player2Color: '#D94A4A',
+    timerMinutes: 5,
   },
   {
     levelId: 'level_3',
@@ -58,6 +61,7 @@ export const LEVELS: Level[] = [
     ],
     player1Color: '#2E7D32', // green
     player2Color: '#6A1B9A', // purple
+    timerMinutes: 5,
   },
 ];
 

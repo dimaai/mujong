@@ -36,38 +36,11 @@
   background-color: rgba(0, 200, 80, 0.45) !important;
 }
 
-/* ── Finish zones ──────────────────────────────────────── */
-
-/* Outer wrapper — stacks the top finish zone, board, and bottom finish zone */
+/* Outer wrapper for the board */
 .boardOuter {
   display: flex;
   flex-direction: column;
   width: fit-content;
-}
-
-/* A finish zone is a single grid row sitting above or below the board */
-.finishZone {
-  display: grid;
-  /* gridTemplateColumns is set via inline style to match the board width */
-}
-
-/* One cell in the finish zone — same width as a board cell, shorter height */
-.finishCell {
-  width: var(--cell-size, 64px);
-  height: calc(var(--cell-size, 64px) * 0.28);
-  cursor: default;
-}
-
-/* A finish cell that can be clicked to win — pulses gold to draw attention */
-.cellWinTarget {
-  background-color: rgba(250, 204, 21, 0.75);
-  cursor: pointer;
-  animation: winPulse 0.9s ease-in-out infinite;
-}
-
-@keyframes winPulse {
-  0%, 100% { background-color: rgba(250, 204, 21, 0.6); }
-  50%       { background-color: rgba(250, 204, 21, 1); }
 }
 
 /* Yellow outline when this cell holds the selected piece */

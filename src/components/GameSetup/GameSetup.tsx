@@ -38,6 +38,7 @@ export function GameSetup() {
   const [selectedLevelId, setSelectedLevelId] = useState(LEVELS[0].levelId);
   const [p1Name, setP1Name] = useState('Player 1');
   const [p2Name, setP2Name] = useState('Player 2');
+  const [timerMinutes, setTimerMinutes] = useState(5);
 
   /**
    * handleStart reads the form values, builds Player objects,
@@ -47,11 +48,14 @@ export function GameSetup() {
     const level = LEVELS.find((l) => l.levelId === selectedLevelId);
     if (!level) return;
 
+    // Override level timer with the user's selection.
+    const levelWithTimer = { ...level, timerMinutes };
+
     // Player objects match the Player interface in domain/types.ts.
     const p1: Player = { id: 'p1', name: p1Name.trim() || 'Player 1', rating: 1000 };
     const p2: Player = { id: 'p2', name: p2Name.trim() || 'Player 2', rating: 1000 };
 
-    startGame(level, p1, p2);
+    startGame(levelWithTimer, p1, p2);
   }
 
   // If a game is already running, render the full game view.
@@ -101,6 +105,22 @@ export function GameSetup() {
           onChange={(e) => setP2Name(e.target.value)}
           maxLength={20}
         />
+      </div>
+
+      <div className={styles.field}>
+        <label htmlFor="timerSelect">Timer per player</label>
+        <select
+          id="timerSelect"
+          value={timerMinutes}
+          onChange={(e) => setTimerMinutes(Number(e.target.value))}
+        >
+          <option value={0}>No timer</option>
+          <option value={1}>1 min</option>
+          <option value={2}>2 min</option>
+          <option value={3}>3 min</option>
+          <option value={5}>5 min</option>
+          <option value={10}>10 min</option>
+        </select>
       </div>
 
       <button className={styles.startButton} onClick={handleStart}>

@@ -92,6 +92,8 @@ export interface Level {
   player1Color: string;
   /** CSS color string for Player 2 (top). Used in strips and panels. */
   player2Color: string;
+  /** Per-player timer in minutes (default 5). 0 = no timer. */
+  timerMinutes: number;
 }
 
 // ── Runtime game-state types ──────────────────────────────────
@@ -176,4 +178,16 @@ export interface GameState {
    * Used for threefold-repetition draw detection.
    */
   positionHashes: string[];
+  /**
+   * When non-null, contains the playerId of the player who offered a draw.
+   * The opponent can accept or reject.
+   */
+  drawOfferFrom: string | null;
+  /** Why the game ended in a draw: repetition or mutual agreement. */
+  drawReason: 'repetition' | 'agreement' | null;
+  /**
+   * Remaining time in seconds for each player.
+   * [0] = Player 1, [1] = Player 2.
+   */
+  playerTimers: [number, number];
 }

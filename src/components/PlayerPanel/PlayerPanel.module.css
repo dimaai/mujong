@@ -1,0 +1,220 @@
+/* PlayerPanel.module.css */
+
+/* ── Unified panel wrapper ────────────────────────────── */
+/* Single container that smoothly transitions height + background. */
+
+.panelWrapper {
+  position: relative;
+  border: none;
+  border-radius: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  transition: height 0.3s ease, background-color 0.3s ease;
+}
+
+/* Both content layers sit on top of each other via absolute positioning.
+   opacity transitions handle the cross-fade; pointerEvents are toggled
+   in JS so only the visible layer is interactive. */
+
+.enlargedContent {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  transition: opacity 0.25s ease;
+}
+
+.minimizedContent {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 0 8px;
+  gap: 6px;
+  transition: opacity 0.25s ease;
+}
+
+.infoRow {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 0 8px;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.playerName {
+  font-weight: 700;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.buttons {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.actionBtn {
+  white-space: nowrap;
+  padding: 2px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  line-height: 1.4;
+  color: inherit;
+  transition: filter 0.15s ease;
+}
+
+.actionBtn:hover {
+  filter: brightness(1.25);
+}
+
+.timer {
+  margin-left: auto;
+  font-size: 16px;
+  font-weight: 700;
+  font-family: monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.figuresArea {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex: 1;
+  min-height: 0;
+  padding: 0 4px;
+}
+
+/* ── Minimized-specific styles ────────────────────────── */
+
+.playerNameMin {
+  font-weight: 700;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+
+.figuresRow {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+/* Timer shown on minimized panel */
+.timerMin {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: monospace;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Draw offer Accept / Reject buttons on minimized panel */
+.drawOfferButtons {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.drawAcceptBtn,
+.drawRejectBtn {
+  white-space: nowrap;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  line-height: 1.4;
+  border: none;
+}
+
+.drawAcceptBtn {
+  background: #22c55e;
+  color: #fff;
+}
+
+.drawAcceptBtn:hover {
+  background: #16a34a;
+}
+
+.drawRejectBtn {
+  background: #ef4444;
+  color: #fff;
+}
+
+.drawRejectBtn:hover {
+  background: #dc2626;
+}
+
+/* Gold pulse when this minimized panel is a winning-move target */
+.winTarget {
+  animation: winPulse 0.9s ease-in-out infinite;
+}
+
+@keyframes winPulse {
+  0%, 100% { box-shadow: inset 0 0 12px rgba(250, 204, 21, 0.4); }
+  50%      { box-shadow: inset 0 0 24px rgba(250, 204, 21, 0.85); }
+}
+
+/* ── Figure slots (shared) ───────────────────────────── */
+
+.slot {
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  flex-shrink: 0;
+  transition: filter 0.1s ease, box-shadow 0.1s ease;
+}
+
+.placed {
+  opacity: 0.3;
+}
+
+.taken {
+  opacity: 0.3;
+}
+
+.slotSelected {
+  box-shadow: 0 0 0 3px #facc15;
+}
+
+.clickable {
+  cursor: pointer;
+}
+
+.clickable:hover {
+  filter: brightness(1.15);
+}
+
+.crossOut {
+  position: absolute;
+  font-size: 18px;
+  color: #e53e3e;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  line-height: 1;
+  pointer-events: none;
+}

@@ -3,16 +3,15 @@
 //
 // PURPOSE: The main game layout — the only component that talks
 // to the Zustand store. It reads state and dispatches actions,
-// then passes everything down to Board and FigurePanel as props.
+// then passes everything down to Board and PlayerPanel as props.
 //
 // Layout (top to bottom):
 //   ┌────────────────────────────┐
-//   │  Color strip (Player 2)    │  ← thin accent bar
-//   ├──────┬──────────────┬──────┤
-//   │ P1   │    Board     │  P2  │  ← side panels + board
-//   │panel │              │panel │
-//   ├──────┴──────────────┴──────┤
-//   │  Color strip (Player 1)    │  ← thin accent bar
+//   │  Player 2 panel (top)      │  ← enlarged when P2's turn
+//   ├────────────────────────────┤
+//   │         Board              │
+//   ├────────────────────────────┤
+//   │  Player 1 panel (bottom)   │  ← enlarged when P1's turn
 //   └────────────────────────────┘
 // ============================================================
 
@@ -21,7 +20,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useGameStore } from '../../store/gameStore';
 import { Board } from '../Board/Board';
-import { FigurePanel } from '../FigurePanel/FigurePanel';
+import { PlayerPanel } from '../PlayerPanel/PlayerPanel';
 import type { Position, TurnAction } from '../../domain/types';
 import styles from './GameCanvas.module.css';
 
@@ -46,35 +45,40 @@ export function GameCanvas() {
     resetSelection,
     resetGame,
     forfeit,
+    offerDraw,
+    acceptDraw,
+    rejectDraw,
+    tickTimer,
   } = useGameStore();
 
-  // If no game is running, show a placeholder (GameSetup handles this case).
+  // If no game is running, show a placeholder (GameSetup handle this case).
   if (!game) {
     return <div className={styles.empty}>No game in progress.</div>;
   }
 
-  const { level, players, currentPlayerIndex, figures, phase, winnerId } = game;
+  const { level, players, currentPlayerIndex, figures, phase, winnerId, drawOfferFrom, playerTimers } = game;
   const currentPlayer = players[currentPlayerIndex];
 
   // ── Responsive cell size ──────────────────────────────────
-  // window.innerWidth/Height are the only values guaranteed to change in
-  // BOTH directions for any resize. Element-based observers miss expansions
-  // when the observed element's width is content-driven (not layout-driven).
+  // Vertical layout: P2 panel + board + P1 panel + banner area.
   //
-  // Reserved space deductions:
-  //   height: 48px  — turn label (~20px) + canvas padding (16px) + gaps
-  //   width:  220px — two side panels (≈2×88px) + gaps (2×16px) + margins
+  // Height budget (in cell-size units):
+  //   board grid:    boardHeight
+  //   enlarged panel: +1    (active player)
+  //   minimized panel: +0.333 (inactive player)
+  //   banner/padding: ~40px fixed
   //
-  // The finish zones add 0.28 of a cell above AND below the board (total +0.56),
-  // so total board height in cells = boardHeight + 0.56.
+  // Width budget: just the board width + small padding.
   const [cellSize, setCellSize] = useState(64);
 
   useEffect(() => {
     const compute = () => {
-      const availH = window.innerHeight - 48;
-      const availW = window.innerWidth  - 220;
-      const fromHeight = Math.floor(availH / (level.boardHeight + 0.56));
-      const fromWidth  = Math.floor(availW / level.boardWidth);
+      const availH = window.innerHeight - 40;
+      const availW = window.innerWidth - 32;
+      // Total cell-units vertically: board + both panels (no finish zones)
+      const cellUnitsH = level.boardHeight + 1 + 1 / 3;
+      const fromHeight = Math.floor(availH / cellUnitsH);
+      const fromWidth = Math.floor(availW / level.boardWidth);
       setCellSize(Math.max(24, Math.min(fromHeight, fromWidth)));
     };
 
@@ -84,28 +88,45 @@ export function GameCanvas() {
   }, [level.boardWidth, level.boardHeight]);
   // ────────────────────────────────────────────────────────────
 
-  // ── Timer ─────────────────────────────────────────────────
-  // Starts on the first move (history.length > 0), stops when the game ends.
-  // intervalRef holds the setInterval ID so we can clear it on demand.
+  // ── Per-player countdown timers ─────────────────────────
+  // Each player's timer counts down only when it's their turn.
+  // timers are stored in the Zustand store; tickTimer() decrements.
+  // Timer is paused when a draw offer is pending or timerMinutes === 0.
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [elapsed, setElapsed] = useState(0);
+  const hasTimer = level.timerMinutes > 0;
 
   useEffect(() => {
-    if (game.history.length > 0 && phase === 'playing' && !intervalRef.current) {
-      intervalRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
+    // Start ticking after the first move, only when timer is enabled.
+    if (hasTimer && game.history.length > 0 && phase === 'playing' && !drawOfferFrom) {
+      if (!intervalRef.current) {
+        intervalRef.current = setInterval(() => {
+          tickTimer();
+        }, 1000);
+      }
+    } else {
+      // Pause: game ended, draw offer pending, or no timer.
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
     }
-    if (phase !== 'playing' && intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-  }, [game.history.length, phase]);
 
-  // Clear on unmount (e.g. New Game / Give Up resets the store, unmounting this component).
-  useEffect(() => {
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
     };
-  }, []);
+  }, [hasTimer, game.history.length, phase, drawOfferFrom, tickTimer]);
+
+  // When the game is over, any key press or tap anywhere returns to main menu.
+  useEffect(() => {
+    if (phase !== 'finished' && phase !== 'draw') return;
+
+    const back = () => resetGame();
+    window.addEventListener('keydown', back);
+    return () => window.removeEventListener('keydown', back);
+  }, [phase, resetGame]);
   // ────────────────────────────────────────────────────────────
 
   /**
@@ -181,93 +202,105 @@ export function GameCanvas() {
     [players[1].id]: level.player2Color,
   };
 
+  // +4 accounts for the board's 2px border on each side
+  const boardPixelWidth = level.boardWidth * cellSize + 4;
+  const p1Timer = hasTimer ? formatTime(playerTimers[0]) : '';
+  const p2Timer = hasTimer ? formatTime(playerTimers[1]) : '';
+
+  // Player 1 (bottom, index 0) is enlarged when it's their turn.
+  // Player 2 (top, index 1) is enlarged when it's their turn.
+  const p1Enlarged = currentPlayerIndex === 0;
+  const p2Enlarged = currentPlayerIndex === 1;
+
+  // Winning move targets: positions beyond the board that the panels absorb.
+  // Player 0 wins by crossing the top (row < 0) → P2's panel (top) is the target.
+  // Player 1 wins by crossing the bottom (row >= boardHeight) → P1's panel (bottom) is the target.
+  const topPanelWinTargets = validMoveTargets.filter((p) => p.row < 0);
+  const bottomPanelWinTargets = validMoveTargets.filter(
+    (p) => p.row >= level.boardHeight,
+  );
+
+  const gameOver = phase === 'finished' || phase === 'draw';
+
   return (
-    <div className={styles.canvas}>
-      {/* ── Middle row: left col + board + right col ────────── */}
-      <div className={styles.middle}>
-
-        {/* ── Left column: New Game + Player 1 panel + Give Up ── */}
-        <div className={styles.sideCol}>
-          <button className={styles.newGameBtn} onClick={resetGame}>
-            ← New Game
-          </button>
-          <FigurePanel
-            playerId={players[0].id}
-            playerName={players[0].name}
-            playerColor={PlayerColors[players[0].id]}
-            figures={figures}
-            isActive={currentPlayerIndex === 0 && phase === 'playing'}
-            selectedInstanceId={selectedInstanceId}
-            onSelectFigure={selectAvailableFigure}
-          />
-          {phase === 'playing' && (
-            <button
-              className={styles.giveUpBtn}
-              style={{ color: PlayerColors[players[0].id], borderColor: PlayerColors[players[0].id] }}
-              onClick={() => forfeit(players[0].id)}
-            >
-              Give up
-            </button>
-          )}
+    <div
+      className={styles.canvas}
+      onClick={gameOver ? resetGame : undefined}
+      style={gameOver ? { cursor: 'pointer' } : undefined}
+    >
+      {/* Winner / draw banner */}
+      {phase === 'finished' && winnerId && (
+        <div className={styles.winnerBanner}>
+          🏆 {players.find((p) => p.id === winnerId)?.name} wins!
         </div>
-
-        {/* ── Center: board + optional winner banner ─────────── */}
-        <div className={styles.boardWrapper}>
-          {phase === 'finished' && winnerId && (
-            <div className={styles.winnerBanner}>
-              🏆 {players.find((p) => p.id === winnerId)?.name} wins!
-            </div>
-          )}
-          {phase === 'draw' && (
-            <div className={styles.drawBanner}>
-              🤝 Draw — repeated moves
-            </div>
-          )}
-          {phase === 'playing' && (
-            <div className={styles.turnLabel} style={{ color: currentPlayer.id === players[0].id ? level.player1Color : level.player2Color }}>
-              {currentPlayer.name}&apos;s turn
-            </div>
-          )}
-          <Board
-            level={level}
-            figures={figures}
-            playerColors={PlayerColors}
-            cellSize={cellSize}
-            selectedInstanceId={selectedInstanceId}
-            validMoveTargets={validMoveTargets}
-            onCellClick={handleCellClick}
-            onFigureClick={handleFigureClick}
-          />
+      )}
+      {phase === 'draw' && (
+        <div className={styles.drawBanner}>
+          {game.drawReason === 'repetition' ? '🤝 Draw — repeated moves' : "🤝 It's a Draw!"}
         </div>
+      )}
 
-        {/* ── Right column: Timer + Player 2 panel + Give Up ─── */}
-        <div className={styles.sideCol}>
-          <div
-            className={styles.timer}
-            style={{ color: PlayerColors[players[1].id] }}
-          >
-            {formatTime(elapsed)}
-          </div>
-          <FigurePanel
-            playerId={players[1].id}
-            playerName={players[1].name}
-            playerColor={PlayerColors[players[1].id]}
-            figures={figures}
-            isActive={currentPlayerIndex === 1 && phase === 'playing'}
-            selectedInstanceId={selectedInstanceId}
-            onSelectFigure={selectAvailableFigure}
-          />
-          {phase === 'playing' && (
-            <button
-              className={styles.giveUpBtn}
-              style={{ color: PlayerColors[players[1].id], borderColor: PlayerColors[players[1].id] }}
-              onClick={() => forfeit(players[1].id)}
-            >
-              Give up
-            </button>
-          )}
-        </div>
+      {/* ── Main vertical stack ────────────────────────────── */}
+      <div className={styles.stack}>
+        {/* Player 2 panel (top) */}
+        <PlayerPanel
+          playerId={players[1].id}
+          playerName={players[1].name}
+          playerColor={PlayerColors[players[1].id]}
+          figures={figures}
+          isActive={currentPlayerIndex === 1 && phase === 'playing'}
+          isEnlarged={p2Enlarged}
+          selectedInstanceId={selectedInstanceId}
+          onSelectFigure={selectAvailableFigure}
+          onGiveUp={() => forfeit(players[1].id)}
+          onOfferDraw={() => offerDraw(players[1].id)}
+          onAcceptDraw={acceptDraw}
+          onRejectDraw={rejectDraw}
+          drawOfferFrom={drawOfferFrom}
+          onExit={resetGame}
+          timer={p2Timer}
+          cellSize={cellSize}
+          boardPixelWidth={boardPixelWidth}
+          isPlaying={phase === 'playing'}
+          winTargets={topPanelWinTargets}
+          onWinClick={handleCellClick}
+        />
 
+        {/* Board */}
+        <Board
+          level={level}
+          figures={figures}
+          playerColors={PlayerColors}
+          cellSize={cellSize}
+          selectedInstanceId={selectedInstanceId}
+          validMoveTargets={validMoveTargets}
+          onCellClick={handleCellClick}
+          onFigureClick={handleFigureClick}
+        />
+
+        {/* Player 1 panel (bottom) */}
+        <PlayerPanel
+          playerId={players[0].id}
+          playerName={players[0].name}
+          playerColor={PlayerColors[players[0].id]}
+          figures={figures}
+          isActive={currentPlayerIndex === 0 && phase === 'playing'}
+          isEnlarged={p1Enlarged}
+          selectedInstanceId={selectedInstanceId}
+          onSelectFigure={selectAvailableFigure}
+          onGiveUp={() => forfeit(players[0].id)}
+          onOfferDraw={() => offerDraw(players[0].id)}
+          onAcceptDraw={acceptDraw}
+          onRejectDraw={rejectDraw}
+          drawOfferFrom={drawOfferFrom}
+          winTargets={bottomPanelWinTargets}
+          onWinClick={handleCellClick}
+          onExit={resetGame}
+          timer={p1Timer}
+          cellSize={cellSize}
+          boardPixelWidth={boardPixelWidth}
+          isPlaying={phase === 'playing'}
+        />
       </div>
     </div>
   );

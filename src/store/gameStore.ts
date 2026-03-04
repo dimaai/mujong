@@ -106,6 +106,24 @@ interface GameStore {
    */
   forfeit: (playerId: string) => void;
 
+  /**
+   * Current player offers a draw to the opponent.
+   * @param playerId - the id of the player making the offer
+   */
+  offerDraw: (playerId: string) => void;
+
+  /** The opponent accepts the pending draw offer. */
+  acceptDraw: () => void;
+
+  /** The opponent rejects the pending draw offer. */
+  rejectDraw: () => void;
+
+  /**
+   * Decrements the active player's timer by 1 second.
+   * @returns true when the timer hits 0 (time-out loss)
+   */
+  tickTimer: () => boolean;
+
   /** Tears down the current game so the setup screen is shown again. */
   resetGame: () => void;
 }
@@ -122,6 +140,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
     // All start with status "available" and position null.
     const figures = createInitialFigures(level, [player1, player2], DEFAULT_SKIN_MAP);
 
+    const timerSeconds = level.timerMinutes * 60;
+
     const newGame: GameState = {
       gameId: `game_${Date.now()}`,
       level,
@@ -133,6 +153,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
       turnNumber: 1,
       history: [],
       positionHashes: [computePositionKey(figures, 0)],
+      drawOfferFrom: null,
+      drawReason: null,
+      playerTimers: [timerSeconds, timerSeconds],
     };
 
     set({ game: newGame, selectedInstanceId: null, validMoveTargets: [] });
@@ -249,10 +272,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
     );
     const updatedHashes = [...game.positionHashes, posKey];
 
+    let drawReason: 'repetition' | 'agreement' | null = null;
     if (phase === 'playing') {
       const count = updatedHashes.filter((h) => h === posKey).length;
       if (count >= 3) {
         phase = 'draw';
+        drawReason = 'repetition';
       }
     }
     // ──────────────────────────────────────────────────────────
@@ -269,6 +294,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
         // Append the action to the history log (enables future undo/replay).
         history: updatedHistory,
         positionHashes: updatedHashes,
+        // Any move cancels a pending draw offer.
+        drawOfferFrom: null,
+        drawReason,
       },
       selectedInstanceId: null,
       validMoveTargets: [],
@@ -289,6 +317,55 @@ export const useGameStore = create<GameStore>((set, get) => ({
       selectedInstanceId: null,
       validMoveTargets: [],
     });
+  },
+
+  offerDraw: (playerId) => {
+    const { game } = get();
+    if (!game || game.phase !== 'playing') return;
+    // Only the current player can offer a draw.
+    if (game.players[game.currentPlayerIndex].id !== playerId) return;
+    set({ game: { ...game, drawOfferFrom: playerId } });
+  },
+
+  acceptDraw: () => {
+    const { game } = get();
+    if (!game || game.phase !== 'playing' || !game.drawOfferFrom) return;
+    set({
+      game: { ...game, phase: 'draw', drawOfferFrom: null, drawReason: 'agreement' },
+      selectedInstanceId: null,
+      validMoveTargets: [],
+    });
+  },
+
+  rejectDraw: () => {
+    const { game } = get();
+    if (!game || !game.drawOfferFrom) return;
+    set({ game: { ...game, drawOfferFrom: null } });
+  },
+
+  tickTimer: () => {
+    const { game } = get();
+    if (!game || game.phase !== 'playing') return false;
+    // Don't tick when a draw offer is pending.
+    if (game.drawOfferFrom) return false;
+
+    const idx = game.currentPlayerIndex;
+    const newTimers: [number, number] = [...game.playerTimers];
+    newTimers[idx] = Math.max(0, newTimers[idx] - 1);
+
+    if (newTimers[idx] <= 0) {
+      // Time-out: the opponent wins.
+      const opponentId = game.players[idx === 0 ? 1 : 0].id;
+      set({
+        game: { ...game, playerTimers: newTimers, phase: 'finished', winnerId: opponentId },
+        selectedInstanceId: null,
+        validMoveTargets: [],
+      });
+      return true;
+    }
+
+    set({ game: { ...game, playerTimers: newTimers } });
+    return false;
   },
 
   resetGame: () => set({ game: null, selectedInstanceId: null, validMoveTargets: [] }),

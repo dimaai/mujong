@@ -65,17 +65,13 @@ export function Board({
 
   // Convert the validMoveTargets array to a Set of "col,row" strings.
   // Set.has() is O(1) — faster than scanning an array for every cell.
-  const targetSet = new Set(validMoveTargets.map((p) => `${p.col},${p.row}`));
-  // Map from column → exact winning Position for top zone (row < 0)
-  const topWinByCol = new Map<number, Position>();
-  // Map from column → exact winning Position for bottom zone (row >= boardHeight)
-  const bottomWinByCol = new Map<number, Position>();
+  // Only include on-board positions (winning moves are handled by PlayerPanel).
+  const targetSet = new Set(
+    validMoveTargets
+      .filter((p) => p.row >= 0 && p.row < boardHeight)
+      .map((p) => `${p.col},${p.row}`),
+  );
 
-  for (const pos of validMoveTargets) {
-    if (pos.row < 0) topWinByCol.set(pos.col, pos);
-    if (pos.row >= boardHeight) bottomWinByCol.set(pos.col, pos);
-  }
-  
   const cells: React.ReactNode[] = [];
 
   // Build cells row by row, column by column (top-left to bottom-right).
@@ -123,52 +119,12 @@ export function Board({
     }
   }
 
-  // Build finish zone rows — one cell per column, clickable only when a
-  // winning move lands in that column.
-  const topZone = Array.from({ length: boardWidth }, (_, col) => {
-    const winPos = topWinByCol.get(col);
-    return (
-      <div
-        key={`top-finish-${col}`}
-        className={[styles.finishCell, winPos ? styles.cellWinTarget : '']
-          .filter(Boolean)
-          .join(' ')}
-        onClick={() => winPos && onCellClick(winPos)}
-      />
-    );
-  });
-
-  const bottomZone = Array.from({ length: boardWidth }, (_, col) => {
-    const winPos = bottomWinByCol.get(col);
-    return (
-      <div
-        key={`bottom-finish-${col}`}
-        className={[styles.finishCell, winPos ? styles.cellWinTarget : '']
-          .filter(Boolean)
-          .join(' ')}
-        onClick={() => winPos && onCellClick(winPos)}
-      />
-    );
-  });
-
   return (
     <div
       className={styles.boardOuter}
-      // --cell-size is consumed by .cell and .finishCell in Board.module.css
+      // --cell-size is consumed by .cell in Board.module.css
       style={{ '--cell-size': `${cellSize}px` } as React.CSSProperties}
     >
-      {/* Top finish zone — Player 1 (bottom player) wins by crossing here */}
-      <div
-        className={styles.finishZone}
-        style={{
-          gridTemplateColumns: `repeat(${boardWidth}, 1fr)`,
-          backgroundColor: level.player1Color,
-        }}
-        title={`${level.player1Color} goal`}
-      >
-        {topZone}
-      </div>
-
       {/* Main board grid */}
       <div
         className={styles.board}
@@ -178,18 +134,6 @@ export function Board({
         }}
       >
         {cells}
-      </div>
-
-      {/* Bottom finish zone — Player 2 (top player) wins by crossing here */}
-      <div
-        className={styles.finishZone}
-        style={{
-          gridTemplateColumns: `repeat(${boardWidth}, 1fr)`,
-          backgroundColor: level.player2Color,
-        }}
-        title={`${level.player2Color} goal`}
-      >
-        {bottomZone}
       </div>
     </div>
   );
