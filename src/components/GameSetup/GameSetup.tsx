@@ -39,6 +39,19 @@ export function GameSetup() {
   const [p1Name, setP1Name] = useState('Player 1');
   const [p2Name, setP2Name] = useState('Player 2');
   const [timerMinutes, setTimerMinutes] = useState(5);
+  const [p1Color, setP1Color] = useState(LEVELS[0].player1Color);
+  const [p2Color, setP2Color] = useState(LEVELS[0].player2Color);
+  const [againstView, setAgainstView] = useState(false);
+
+  // When the user picks a different level, update the default colors.
+  function handleLevelChange(levelId: string) {
+    setSelectedLevelId(levelId);
+    const lvl = LEVELS.find((l) => l.levelId === levelId);
+    if (lvl) {
+      setP1Color(lvl.player1Color);
+      setP2Color(lvl.player2Color);
+    }
+  }
 
   /**
    * handleStart reads the form values, builds Player objects,
@@ -48,14 +61,19 @@ export function GameSetup() {
     const level = LEVELS.find((l) => l.levelId === selectedLevelId);
     if (!level) return;
 
-    // Override level timer with the user's selection.
-    const levelWithTimer = { ...level, timerMinutes };
+    // Override level defaults with the user's selections.
+    const customLevel = {
+      ...level,
+      timerMinutes,
+      player1Color: p1Color,
+      player2Color: p2Color,
+    };
 
     // Player objects match the Player interface in domain/types.ts.
     const p1: Player = { id: 'p1', name: p1Name.trim() || 'Player 1', rating: 1000 };
     const p2: Player = { id: 'p2', name: p2Name.trim() || 'Player 2', rating: 1000 };
 
-    startGame(levelWithTimer, p1, p2);
+    startGame(customLevel, p1, p2, againstView);
   }
 
   // If a game is already running, render the full game view.
@@ -67,7 +85,8 @@ export function GameSetup() {
   // Otherwise render the setup form with the game title.
   return (
     <div className={styles.setupWrapper}>
-      <h1 className={styles.title}>Mujong</h1>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/images/logo.png" alt="Mojong" className={styles.logo} />
     <div className={styles.form}>
       <div className={styles.field}>
         <label htmlFor="levelSelect">Level</label>
@@ -75,7 +94,7 @@ export function GameSetup() {
         <select
           id="levelSelect"
           value={selectedLevelId}
-          onChange={(e) => setSelectedLevelId(e.target.value)}
+          onChange={(e) => handleLevelChange(e.target.value)}
         >
           {LEVELS.map((l) => (
             <option key={l.levelId} value={l.levelId}>
@@ -87,24 +106,42 @@ export function GameSetup() {
 
       <div className={styles.field}>
         <label htmlFor="p1Name">Player 1 name (bottom)</label>
-        <input
-          id="p1Name"
-          type="text"
-          value={p1Name}
-          onChange={(e) => setP1Name(e.target.value)}
-          maxLength={20}
-        />
+        <div className={styles.nameRow}>
+          <input
+            id="p1Name"
+            type="text"
+            value={p1Name}
+            onChange={(e) => setP1Name(e.target.value)}
+            maxLength={25}
+          />
+          <input
+            id="p1Color"
+            type="color"
+            value={p1Color}
+            onChange={(e) => setP1Color(e.target.value)}
+            className={styles.colorTile}
+          />
+        </div>
       </div>
 
       <div className={styles.field}>
         <label htmlFor="p2Name">Player 2 name (top)</label>
-        <input
-          id="p2Name"
-          type="text"
-          value={p2Name}
-          onChange={(e) => setP2Name(e.target.value)}
-          maxLength={20}
-        />
+        <div className={styles.nameRow}>
+          <input
+            id="p2Name"
+            type="text"
+            value={p2Name}
+            onChange={(e) => setP2Name(e.target.value)}
+            maxLength={25}
+          />
+          <input
+            id="p2Color"
+            type="color"
+            value={p2Color}
+            onChange={(e) => setP2Color(e.target.value)}
+            className={styles.colorTile}
+          />
+        </div>
       </div>
 
       <div className={styles.field}>
@@ -121,6 +158,23 @@ export function GameSetup() {
           <option value={5}>5 min</option>
           <option value={10}>10 min</option>
         </select>
+      </div>
+
+      <div className={styles.toggleField}>
+        <label htmlFor="againstView" className={styles.toggleLabel}>
+          <input
+            id="againstView"
+            type="checkbox"
+            checked={againstView}
+            onChange={(e) => setAgainstView(e.target.checked)}
+            className={styles.toggleCheckbox}
+          />
+          <span className={styles.toggleSwitch} />
+          Against view
+        </label>
+        <span className={styles.toggleHint}>
+          Flips top panel for face-to-face play
+        </span>
       </div>
 
       <button className={styles.startButton} onClick={handleStart}>

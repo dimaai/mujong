@@ -13,4 +13,6 @@ export interface FigureIconProps {
   size?: number;
   /** When true, renders a gold selection ring around the sphere. */
   selected?: boolean;
+  /** When true, the icon image on the sphere is rendered upside-down. */
+  flipped?: boolean;
 }

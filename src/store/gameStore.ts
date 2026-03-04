@@ -74,7 +74,7 @@ interface GameStore {
    * @param player1 - bottom player (moves toward row 0)
    * @param player2 - top player    (moves toward last row)
    */
-  startGame: (level: Level, player1: Player, player2: Player) => void;
+  startGame: (level: Level, player1: Player, player2: Player, againstView?: boolean) => void;
 
   /**
    * Selects a PLACED figure on the board and computes its legal moves.
@@ -135,7 +135,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   selectedInstanceId: null,
   validMoveTargets: [],
 
-  startGame: (level, player1, player2) => {
+  startGame: (level, player1, player2, againstView) => {
     // createInitialFigures builds all PlayerFigureInstances for both players.
     // All start with status "available" and position null.
     const figures = createInitialFigures(level, [player1, player2], DEFAULT_SKIN_MAP);
@@ -156,6 +156,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       drawOfferFrom: null,
       drawReason: null,
       playerTimers: [timerSeconds, timerSeconds],
+      againstView: againstView ?? false,
     };
 
     set({ game: newGame, selectedInstanceId: null, validMoveTargets: [] });

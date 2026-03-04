@@ -19,7 +19,7 @@ import './globals.css';
  * You do not need to add a <head> tag manually.
  */
 export const metadata: Metadata = {
-  title: 'Mujong',
+  title: 'Mojong',
   description: 'A 2-player strategy board game',
 };
 

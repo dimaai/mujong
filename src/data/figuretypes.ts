@@ -51,7 +51,7 @@ export const FIGURE_TYPES: FigureType[] = [
     name: 'Ziraf',
     // Moves up to 2 vertical orI 1 horizontal AND can jump over pieces.
     // Useful for escaping tight situations where other pieces are blocked.
-    movement: { vertical: 2, horizontal: 1, diagonal: 0 },
+    movement: { vertical: 0, horizontal: 0, diagonal: 2 },
     canJump: true,
   },
 ];

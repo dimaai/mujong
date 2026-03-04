@@ -190,4 +190,9 @@ export interface GameState {
    * [0] = Player 1, [1] = Player 2.
    */
   playerTimers: [number, number];
+  /**
+   * When true, the top player's panel is rendered upside-down
+   * so two players can sit across from each other on one screen.
+   */
+  againstView: boolean;
 }

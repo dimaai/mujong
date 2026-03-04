@@ -8,6 +8,7 @@
   height: 100dvh;
   padding: 8px 0;
   overflow: hidden;
+  background: linear-gradient(170deg, #0a0412 0%, #150b28 40%, #1c1035 100%);
 }
 
 /* Vertical stack: P2 panel → Board → P1 panel — no gap so panels touch the board */
@@ -16,30 +17,36 @@
   flex-direction: column;
   align-items: center;
   gap: 0;
+  box-shadow: 6px 8px 24px rgba(0, 0, 0, 0.6);
+  border-radius: 4px;
 }
 
 .winnerBanner {
   font-size: 22px;
   font-weight: 700;
-  color: #2d7d32;
+  color: #a3e635;
   text-align: center;
-  padding: 4px 12px;
-  background: #e8f5e9;
-  border-radius: 6px;
+  padding: 6px 16px;
+  background: rgba(163, 230, 53, 0.12);
+  border: 1px solid rgba(163, 230, 53, 0.25);
+  border-radius: 10px;
+  backdrop-filter: blur(8px);
 }
 
 .drawBanner {
   font-size: 22px;
   font-weight: 700;
-  color: #7b6c00;
+  color: #fbbf24;
   text-align: center;
-  padding: 4px 12px;
-  background: #fff8e1;
-  border-radius: 6px;
+  padding: 6px 16px;
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  border-radius: 10px;
+  backdrop-filter: blur(8px);
 }
 
 .empty {
   padding: 32px;
-  color: #888;
+  color: #7c6a9b;
   font-style: italic;
 }

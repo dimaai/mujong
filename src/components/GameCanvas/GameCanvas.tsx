@@ -56,7 +56,7 @@ export function GameCanvas() {
     return <div className={styles.empty}>No game in progress.</div>;
   }
 
-  const { level, players, currentPlayerIndex, figures, phase, winnerId, drawOfferFrom, playerTimers } = game;
+  const { level, players, currentPlayerIndex, figures, phase, winnerId, drawOfferFrom, playerTimers, againstView } = game;
   const currentPlayer = players[currentPlayerIndex];
 
   // ── Responsive cell size ──────────────────────────────────
@@ -64,8 +64,8 @@ export function GameCanvas() {
   //
   // Height budget (in cell-size units):
   //   board grid:    boardHeight
-  //   enlarged panel: +1    (active player)
-  //   minimized panel: +0.333 (inactive player)
+  //   enlarged panel: +1.5  (active player)
+  //   minimized panel: +0.5 (inactive player)
   //   banner/padding: ~40px fixed
   //
   // Width budget: just the board width + small padding.
@@ -76,7 +76,7 @@ export function GameCanvas() {
       const availH = window.innerHeight - 40;
       const availW = window.innerWidth - 32;
       // Total cell-units vertically: board + both panels (no finish zones)
-      const cellUnitsH = level.boardHeight + 1 + 1 / 3;
+      const cellUnitsH = level.boardHeight + 1.5 + 1 / 2;
       const fromHeight = Math.floor(availH / cellUnitsH);
       const fromWidth = Math.floor(availW / level.boardWidth);
       setCellSize(Math.max(24, Math.min(fromHeight, fromWidth)));
@@ -202,8 +202,8 @@ export function GameCanvas() {
     [players[1].id]: level.player2Color,
   };
 
-  // +4 accounts for the board's 2px border on each side
-  const boardPixelWidth = level.boardWidth * cellSize + 4;
+  // +gaps: 1px gap between each column = (boardWidth - 1) extra pixels
+  const boardPixelWidth = level.boardWidth * cellSize + (level.boardWidth - 1);
   const p1Timer = hasTimer ? formatTime(playerTimers[0]) : '';
   const p2Timer = hasTimer ? formatTime(playerTimers[1]) : '';
 
@@ -247,6 +247,7 @@ export function GameCanvas() {
           playerId={players[1].id}
           playerName={players[1].name}
           playerColor={PlayerColors[players[1].id]}
+          opponentColor={PlayerColors[players[0].id]}
           figures={figures}
           isActive={currentPlayerIndex === 1 && phase === 'playing'}
           isEnlarged={p2Enlarged}
@@ -264,6 +265,7 @@ export function GameCanvas() {
           isPlaying={phase === 'playing'}
           winTargets={topPanelWinTargets}
           onWinClick={handleCellClick}
+          flipped={againstView}
         />
 
         {/* Board */}
@@ -283,6 +285,7 @@ export function GameCanvas() {
           playerId={players[0].id}
           playerName={players[0].name}
           playerColor={PlayerColors[players[0].id]}
+          opponentColor={PlayerColors[players[1].id]}
           figures={figures}
           isActive={currentPlayerIndex === 0 && phase === 'playing'}
           isEnlarged={p1Enlarged}

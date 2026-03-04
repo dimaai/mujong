@@ -12,69 +12,16 @@
 import React from 'react';
 import type { FigureIconProps } from './FigureIconProps';
 
-// ── Symbol definitions ────────────────────────────────────────
-// Each value is the SVG content rendered on top of the sphere.
-// Symbols use white fill/stroke so they work on any player color.
-// Every symbol is paired with a shadow copy (translated 1px right,
-// 1.5px down, black at low opacity) to give an embedded-in-surface look.
+// ── Icon image paths ──────────────────────────────────────────
+// Each figure type maps to a PNG in /public/images/ rendered on
+// the sphere surface via an SVG <image> element.
 
-const SYMBOLS: Record<string, React.ReactNode> = {
-  // Slon — diagonal-only mover. Symbol: diamond (four diagonal points).
-  ft_slon: (
-    <>
-      <polygon points="24,13 36,24 24,35 12,24"
-        fill="black" opacity="0.22" transform="translate(1,1.5)" />
-      <polygon points="24,13 36,24 24,35 12,24"
-        fill="white" opacity="0.88" />
-    </>
-  ),
-
-  // Runner — long vertical + horizontal range. Symbol: upward chevron.
-  ft_runner: (
-    <>
-      <polyline points="13,30 24,16 35,30"
-        fill="none" stroke="black" strokeOpacity="0.22"
-        strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round"
-        transform="translate(1,1.5)" />
-      <polyline points="13,30 24,16 35,30"
-        fill="none" stroke="white" strokeOpacity="0.9"
-        strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" />
-    </>
-  ),
-
-  // Cross — short vertical + horizontal mover. Symbol: plus sign.
-  ft_cross: (
-    <>
-      <g transform="translate(1,1.5)" opacity="0.22">
-        <rect x="21" y="12" width="6" height="24" rx="2" fill="black" />
-        <rect x="12" y="21" width="24" height="6" rx="2" fill="black" />
-      </g>
-      <rect x="21" y="12" width="6" height="24" rx="2" fill="white" opacity="0.88" />
-      <rect x="12" y="21" width="24" height="6" rx="2" fill="white" opacity="0.88" />
-    </>
-  ),
-
-  // Ziraf — tall vertical reach, can jump. Symbol: tall arch / leap arc.
-  ft_ziraf: (
-    <>
-      <path d="M15,34 Q15,12 24,12 Q33,12 33,34"
-        fill="none" stroke="black" strokeOpacity="0.22"
-        strokeWidth="4" strokeLinecap="round"
-        transform="translate(1,1.5)" />
-      <path d="M15,34 Q15,12 24,12 Q33,12 33,34"
-        fill="none" stroke="white" strokeOpacity="0.9"
-        strokeWidth="4" strokeLinecap="round" />
-    </>
-  ),
+const ICON_PATHS: Record<string, string> = {
+  ft_slon: '/images/x.png',
+  ft_runner: '/images/arrow.png',
+  ft_cross: '/images/cross.png',
+  ft_ziraf: '/images/long_x.png',
 };
-
-// Fallback symbol for unknown types — question mark.
-const FALLBACK_SYMBOL = (
-  <text x="24" y="30" textAnchor="middle" fontSize="18"
-    fill="white" opacity="0.9" fontWeight="bold" fontFamily="sans-serif">
-    ?
-  </text>
-);
 
 // ── Component ─────────────────────────────────────────────────
 
@@ -100,35 +47,52 @@ export function FigureIcon({
   color,
   size = 48,
   selected = false,
+  flipped = false,
 }: FigureIconAllProps) {
   // Gradient ID encodes both the type and color so instances with different
   // player colors never share the wrong gradient definition.
   const gradId = `sphere-${figureTypeId}-${color.replace(/[^a-zA-Z0-9]/g, '')}`;
-  const symbol = SYMBOLS[figureTypeId] ?? FALLBACK_SYMBOL;
+  const iconPath = ICON_PATHS[figureTypeId];
 
   return (
     <svg width={size} height={size} viewBox="0 0 48 48" style={{ display: 'block' }}>
       <defs>
         <radialGradient id={gradId} cx="35%" cy="28%" r="62%" fx="35%" fy="28%">
-          {/* Bright highlight where the light hits */}
-          <stop offset="0%"   stopColor="white" stopOpacity="0.75" />
-          {/* Player color in the mid-band */}
-          <stop offset="45%"  stopColor={color} stopOpacity="1" />
+          {/* Player color fills the sphere */}
+          <stop offset="0%"   stopColor={color} stopOpacity="1" />
           {/* Deep shadow on the far side */}
           <stop offset="100%" stopColor="black" stopOpacity="0.5" />
         </radialGradient>
+        {selected && (
+          <filter id="sel-glow">
+            <feGaussianBlur stdDeviation="3" result="blur" />
+            <feFlood floodColor="#facc15" floodOpacity="0.7" />
+            <feComposite in2="blur" operator="in" />
+            <feMerge>
+              <feMergeNode />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        )}
       </defs>
 
-      {/* Gold selection ring — outside the sphere boundary */}
-      {selected && (
-        <circle cx="24" cy="24" r="23" fill="none" stroke="#facc15" strokeWidth="2.5" />
-      )}
-
       {/* Sphere — filled with the radial gradient */}
-      <circle cx="24" cy="24" r="20" fill={`url(#${gradId})`} />
+      <circle cx="24" cy="24" r="20" fill={`url(#${gradId})`} filter={selected ? 'url(#sel-glow)' : undefined} />
 
-      {/* Inner symbol — sits on top of the sphere surface */}
-      {symbol}
+      {/* Icon image rendered on top of the sphere surface */}
+      {iconPath ? (
+        <image
+          href={iconPath}
+          x="4" y="4" width="40" height="40"
+          opacity="0.9"
+          transform={flipped ? 'rotate(180 24 24)' : undefined}
+        />
+      ) : (
+        <text x="24" y="30" textAnchor="middle" fontSize="18"
+          fill="white" opacity="0.9" fontWeight="bold" fontFamily="sans-serif">
+          ?
+        </text>
+      )}
     </svg>
   );
 }

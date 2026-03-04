@@ -41,6 +41,8 @@ interface PlayerPanelProps {
   playerName: string;
   /** CSS color used for the translucent background, name label, and timer. */
   playerColor: string;
+  /** CSS color of the opponent player — used for draw-offer button backgrounds. */
+  opponentColor: string;
   /** ALL figures in the game — panel filters by playerId internally. */
   figures: PlayerFigureInstance[];
   /** True when it is this player's turn. */
@@ -70,6 +72,8 @@ interface PlayerPanelProps {
   winTargets: Position[];
   /** Called when the user clicks this panel as a winning-move target. */
   onWinClick: (pos: Position) => void;
+  /** When true, the entire panel is rendered upside-down for face-to-face play. */
+  flipped?: boolean;
 }
 
 // ── PlayerPanel component ─────────────────────────────────────
@@ -78,6 +82,7 @@ export function PlayerPanel({
   playerId,
   playerName,
   playerColor,
+  opponentColor,
   figures,
   isActive,
   isEnlarged,
@@ -95,12 +100,13 @@ export function PlayerPanel({
   isPlaying,
   winTargets,
   onWinClick,
+  flipped,
 }: PlayerPanelProps) {
   const myFigures = figures.filter((f) => f.playerId === playerId);
 
-  const enlargedHeight = cellSize;
-  const minimizedHeight = Math.round(cellSize / 3);
-  const infoRowHeight = minimizedHeight; // top row = 1/3 cellSize
+  const enlargedHeight = Math.round(cellSize * 1.5);
+  const minimizedHeight = Math.round(cellSize / 2);
+  const infoRowHeight = minimizedHeight; // top row = 1/2 cellSize
   const figuresAreaHeight = enlargedHeight - infoRowHeight; // bottom area = 2/3 cellSize
 
   // Figure slot size adapts to the available vertical space.
@@ -113,8 +119,8 @@ export function PlayerPanel({
   const opponentOfferedDraw = drawOfferFrom !== null && drawOfferFrom !== playerId;
 
   // Translucent background from the player's color.
-  const bgColor = hexToRgba(playerColor, 0.18);
-  const bgColorWin = hexToRgba(playerColor, 0.35);
+  const bgColor = hexToRgba(playerColor, 0.35);
+  const bgColorWin = hexToRgba(playerColor, 0.55);
 
   // Button gradient: vertical, player-color, fully opaque.
   const btnStyle: React.CSSProperties = {
@@ -122,6 +128,8 @@ export function PlayerPanel({
     borderColor: playerColor,
     color: '#fff',
   };
+
+  const opponentBg = hexToRgba(opponentColor, 0.35);
 
   const currentHeight = isEnlarged ? enlargedHeight : minimizedHeight;
   const currentBg = hasWinTarget && !isEnlarged ? bgColorWin : bgColor;
@@ -139,6 +147,7 @@ export function PlayerPanel({
         height: currentHeight,
         backgroundColor: currentBg,
         cursor: hasWinTarget && !isEnlarged ? 'pointer' : 'default',
+        transform: flipped ? 'rotate(180deg)' : undefined,
       }}
       onClick={() => {
         if (hasWinTarget && !isEnlarged) {
@@ -223,12 +232,14 @@ export function PlayerPanel({
           <div className={styles.drawOfferButtons}>
             <button
               className={styles.drawAcceptBtn}
+              style={{ background: opponentBg }}
               onClick={(e) => { e.stopPropagation(); onAcceptDraw(); }}
             >
               Accept draw
             </button>
             <button
               className={styles.drawRejectBtn}
+              style={{ background: opponentBg }}
               onClick={(e) => { e.stopPropagation(); onRejectDraw(); }}
             >
               Reject
@@ -334,7 +345,7 @@ function CompactFigureSlot({
         figureTypeId={instance.figureTypeId}
         color={playerColor}
         size={Math.max(12, size - 4)}
-        selected={isSelected}
+        flipped={instance.playerId === 'p2'}
       />
 
       {instance.status === 'taken' && (

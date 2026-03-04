@@ -112,6 +112,7 @@ export function Board({
               isSelected={isSelected}
               color={playerColors[figure.playerId] ?? '#888'}
               iconSize={Math.max(16, cellSize - 6)}
+              flipped={figure.playerId === 'p2'}
             />
           )}
         </div>,
@@ -125,12 +126,20 @@ export function Board({
       // --cell-size is consumed by .cell in Board.module.css
       style={{ '--cell-size': `${cellSize}px` } as React.CSSProperties}
     >
+      {/* Logo watermark behind the board */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/images/logo.png"
+        alt=""
+        className={styles.boardLogo}
+      />
+
       {/* Main board grid */}
       <div
         className={styles.board}
         style={{
-          gridTemplateColumns: `repeat(${boardWidth}, 1fr)`,
-          gridTemplateRows: `repeat(${boardHeight}, 1fr)`,
+          gridTemplateColumns: `repeat(${boardWidth}, ${cellSize}px)`,
+          gridTemplateRows: `repeat(${boardHeight}, ${cellSize}px)`,
         }}
       >
         {cells}
@@ -148,6 +157,8 @@ interface FigureTokenProps {
   color: string;
   /** SVG icon diameter in px — scales with cell size. */
   iconSize: number;
+  /** When true, the icon on the figure is rendered upside-down. */
+  flipped?: boolean;
 }
 
 /**
@@ -157,13 +168,14 @@ interface FigureTokenProps {
  * Outputs: none (purely visual)
  * Side effects: none
  */
-function FigureToken({ instance, isSelected, color, iconSize }: FigureTokenProps) {
+function FigureToken({ instance, isSelected, color, iconSize, flipped }: FigureTokenProps) {
   return (
     <FigureIcon
       figureTypeId={instance.figureTypeId}
       color={color}
       size={iconSize}
       selected={isSelected}
+      flipped={flipped}
     />
   );
 }

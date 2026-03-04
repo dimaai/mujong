@@ -146,7 +146,6 @@ function FigureSlot({ instance, isSelected, isActive, playerColor, onClick }: Fi
         figureTypeId={instance.figureTypeId}
         color={playerColor}
         size={44}
-        selected={isSelected}
       />
 
       {/* Crossed-out overlay for captured pieces */}
