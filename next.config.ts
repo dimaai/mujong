@@ -6,6 +6,7 @@ import type { NextConfig } from 'next';
 // duplicate console logs while learning — just know why they appear.
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  output: 'export',
 };
 
 export default nextConfig;
