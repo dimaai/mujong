@@ -37,7 +37,7 @@ export const LEVELS: Level[] = [
     levelName: 'Standard',
     // Full 8×8 board — more room and more pieces to manage.
     boardWidth: 8,
-    boardHeight: ,
+    boardHeight: 10,
     allowedFigures: [
       { figureTypeId: 'ft_slon', quantity: 2 },
       { figureTypeId: 'ft_runner', quantity: 2 },
