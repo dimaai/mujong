@@ -18,7 +18,7 @@ export const LEVELS: Level[] = [
     levelName: 'Beginner',
     // Small 6×6 board — easier to understand movement and strategy.
     boardWidth: 6,
-    boardHeight: 6,
+    boardHeight: 8,
     // Each player gets 3 Walkers and 1 Runner.
     // Simple set so you can learn placement and basic movement.
     allowedFigures: [
@@ -39,9 +39,10 @@ export const LEVELS: Level[] = [
     boardWidth: 8,
     boardHeight: 8,
     allowedFigures: [
-      { figureTypeId: 'ft_slon', quantity: 1 },
+      { figureTypeId: 'ft_slon', quantity: 2 },
       { figureTypeId: 'ft_runner', quantity: 2 },
-      { figureTypeId: 'ft_cross', quantity: 2 },
+      { figureTypeId: 'ft_cross', quantity: 1 },
+      { figureTypeId: 'ft_ziraf', quantity: 1 },
     ],
     player1Color: '#4A90D9',
     player2Color: '#D94A4A',
@@ -52,7 +53,7 @@ export const LEVELS: Level[] = [
     levelNumber: 3,
     levelName: 'Advanced',
     // Wider board — encourages horizontal planning.
-    boardWidth: 5,
+    boardWidth: 6,
     boardHeight: 11,
     allowedFigures: [
       { figureTypeId: 'ft_slon', quantity: 2 },

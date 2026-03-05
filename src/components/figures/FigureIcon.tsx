@@ -9,7 +9,7 @@
 // figureTypeId as the key. No new files needed.
 // ============================================================
 
-import React from 'react';
+import React, { useId } from 'react';
 import type { FigureIconProps } from './FigureIconProps';
 
 // ── Icon image paths ──────────────────────────────────────────
@@ -49,9 +49,11 @@ export function FigureIcon({
   selected = false,
   flipped = false,
 }: FigureIconAllProps) {
-  // Gradient ID encodes both the type and color so instances with different
-  // player colors never share the wrong gradient definition.
-  const gradId = `sphere-${figureTypeId}-${color.replace(/[^a-zA-Z0-9]/g, '')}`;
+  // Unique IDs per component instance so gradient/filter references never
+  // collide with another FigureIcon in the document (SVG ids are global).
+  const uid = useId().replace(/:/g, '');
+  const gradId = `sphere-${uid}`;
+  const glowId = `sel-glow-${uid}`;
   const iconPath = ICON_PATHS[figureTypeId];
 
   return (
@@ -64,7 +66,7 @@ export function FigureIcon({
           <stop offset="100%" stopColor="black" stopOpacity="0.5" />
         </radialGradient>
         {selected && (
-          <filter id="sel-glow">
+          <filter id={glowId}>
             <feGaussianBlur stdDeviation="3" result="blur" />
             <feFlood floodColor="#facc15" floodOpacity="0.7" />
             <feComposite in2="blur" operator="in" />
@@ -77,7 +79,7 @@ export function FigureIcon({
       </defs>
 
       {/* Sphere — filled with the radial gradient */}
-      <circle cx="24" cy="24" r="20" fill={`url(#${gradId})`} filter={selected ? 'url(#sel-glow)' : undefined} />
+      <circle cx="24" cy="24" r="20" fill={`url(#${gradId})`} filter={selected ? `url(#${glowId})` : undefined} />
 
       {/* Icon image rendered on top of the sphere surface */}
       {iconPath ? (
