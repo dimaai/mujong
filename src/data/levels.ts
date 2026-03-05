@@ -3,7 +3,7 @@
 //
 // PURPOSE: Seed level definitions.
 // Each level controls board dimensions, which pieces both players
-// receive, and the accent colors shown in the UI.
+// receive, and the accent colours shown in the UI.
 //
 // levelNumber is the sort order shown on the selection screen.
 // player1Color / player2Color are any valid CSS color strings.
