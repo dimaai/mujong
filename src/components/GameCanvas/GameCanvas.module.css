@@ -4,9 +4,9 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   height: 100dvh;
-  padding: 8px 0;
+  padding: 0;
   overflow: hidden;
   background: linear-gradient(170deg, #0a0412 0%, #150b28 40%, #1c1035 100%);
 }
@@ -17,8 +17,9 @@
   flex-direction: column;
   align-items: center;
   gap: 0;
-  box-shadow: 6px 8px 24px rgba(0, 0, 0, 0.6);
+  box-shadow: 8px 0 24px rgba(0, 0, 0, 0.6);
   border-radius: 4px;
+  position: relative;
 }
 
 .winnerBanner {
@@ -49,4 +50,135 @@
   padding: 32px;
   color: #7c6a9b;
   font-style: italic;
+}
+
+/* ── Board row: timerBar | board | timerBar ── */
+
+.boardRow {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+}
+
+/* ── Board wrapper (position anchor for overlays) ── */
+
+.boardWrapper {
+  position: relative;
+  overflow: visible;
+}
+
+/* ── Timer bars ──────────────────────────────────────────────── */
+
+.timerBar {
+  position: relative;
+  z-index: 5;
+  background: rgba(60, 60, 60, 0.5);
+}
+
+.timerBarFill {
+  position: absolute;
+  width: 100%;
+  opacity: 0.5;
+  transition: height 1s linear, background-color 0.5s ease;
+}
+
+.timerText {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-90deg);
+  font-size: 9px;
+  font-weight: 700;
+  font-family: monospace;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.8);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ── Sandwich-menu overlay ───────────────────────────────────── */
+
+.menuBackdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+}
+
+.menuPanel {
+  position: absolute;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: rgba(13, 8, 32, 0.92);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  z-index: 11;
+  padding: 12px;
+}
+
+.menuPlayerName {
+  font-size: 15px;
+  font-weight: 700;
+  color: #b8a8d4;
+}
+
+.menuButtons {
+  display: flex;
+  gap: 10px;
+}
+
+.menuBtn {
+  padding: 10px 18px;
+  background: linear-gradient(135deg, #7c3aed, #6d28d9);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.2s;
+  box-shadow: 0 3px 10px rgba(124, 58, 237, 0.35);
+}
+
+.menuBtn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 16px rgba(124, 58, 237, 0.5);
+}
+
+.menuBtn:active {
+  transform: translateY(0);
+}
+
+/* ── Draw response panel ─────────────────────────────────────── */
+
+.drawPanel {
+  position: absolute;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: rgba(13, 8, 32, 0.92);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  z-index: 11;
+}
+
+.drawPanelText {
+  font-size: 16px;
+  font-weight: 700;
+  color: #e8e0f0;
+}
+
+.drawPanelButtons {
+  display: flex;
+  gap: 12px;
 }

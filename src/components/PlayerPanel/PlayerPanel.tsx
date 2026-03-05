@@ -5,24 +5,20 @@
 // Has two visual modes driven by isEnlarged:
 //
 //   Enlarged (active player, height = 1 cellSize):
-//   ┌─────────────────────────────────────────────────┐
-//   │ Name     [Give up][Draw][Exit]           Timer  │
-//   │            [fig1] [fig2] [fig3] [fig4]          │
-//   └─────────────────────────────────────────────────┘
+//   ┌───────────────────────────────────────────┬───┐
+//   │  [fig1] [fig2] [fig3] [fig4]             │ ≡ │
+//   └───────────────────────────────────────────┴───┘
 //
-//   Minimized (inactive player, height = cellSize / 3):
+//   Minimized (inactive player, height = cellSize / 2):
 //   ┌─────────────────────────────────────────────────┐
 //   │ Name  [fig1][fig2][fig3][fig4]                  │
 //   └─────────────────────────────────────────────────┘
 //
-// When the opponent has a winning move, the minimized panel is
-// highlighted as a clickable "winning area" (pulsing gold overlay).
+// Timer is now rendered as a 2px bar on the board edge (by GameCanvas).
+// Action buttons live in the sandwich-menu overlay (also GameCanvas).
 //
-// Styling: no border — uses a half-transparent player-color background.
-// Touches the board with no gap.
-//
-// Inputs:  player data, figures, sizing, callbacks, winTargets
-// Outputs: fires onSelectFigure, onGiveUp, onOfferDraw, onExit, onWinClick
+// Inputs:  player data, figures, sizing, onMenuToggle, winTargets
+// Outputs: fires onSelectFigure, onMenuToggle, onWinClick
 // Side effects: none — purely presentational
 // ============================================================
 
@@ -39,40 +35,19 @@ import styles from './PlayerPanel.module.css';
 interface PlayerPanelProps {
   playerId: string;
   playerName: string;
-  /** CSS color used for the translucent background, name label, and timer. */
   playerColor: string;
-  /** CSS color of the opponent player — used for draw-offer button backgrounds. */
-  opponentColor: string;
-  /** ALL figures in the game — panel filters by playerId internally. */
   figures: PlayerFigureInstance[];
-  /** True when it is this player's turn. */
   isActive: boolean;
-  /** True → enlarged (height = cellSize). False → minimized (height = cellSize/3). */
   isEnlarged: boolean;
   selectedInstanceId: string | null;
   onSelectFigure: (instanceId: string) => void;
-  onGiveUp: () => void;
-  onOfferDraw: () => void;
-  /** Called by the opponent panel to accept the pending draw offer. */
-  onAcceptDraw: () => void;
-  /** Called by the opponent panel to reject the pending draw offer. */
-  onRejectDraw: () => void;
-  /** The playerId of whoever offered a draw, or null. */
-  drawOfferFrom: string | null;
-  onExit: () => void;
-  /** Formatted "MM:SS" timer string. Empty string when timer is disabled. */
-  timer: string;
-  /** Pixel size of one board cell — drives all panel sizing. */
+  /** Opens / closes the sandwich-menu overlay (rendered by GameCanvas). */
+  onMenuToggle: () => void;
   cellSize: number;
-  /** Board width in pixels (boardWidth × cellSize). */
   boardPixelWidth: number;
-  /** Whether the game is still in the playing phase. */
   isPlaying: boolean;
-  /** Winning-move positions that land on this panel (row < 0 or row >= boardHeight). */
   winTargets: Position[];
-  /** Called when the user clicks this panel as a winning-move target. */
   onWinClick: (pos: Position) => void;
-  /** When true, the entire panel is rendered upside-down for face-to-face play. */
   flipped?: boolean;
 }
 
@@ -82,19 +57,12 @@ export function PlayerPanel({
   playerId,
   playerName,
   playerColor,
-  opponentColor,
   figures,
   isActive,
   isEnlarged,
   selectedInstanceId,
   onSelectFigure,
-  onGiveUp,
-  onOfferDraw,
-  onAcceptDraw,
-  onRejectDraw,
-  drawOfferFrom,
-  onExit,
-  timer,
+  onMenuToggle,
   cellSize,
   boardPixelWidth,
   isPlaying,
@@ -104,32 +72,17 @@ export function PlayerPanel({
 }: PlayerPanelProps) {
   const myFigures = figures.filter((f) => f.playerId === playerId);
 
-  const enlargedHeight = Math.round(cellSize * 1.5);
+  const enlargedHeight = cellSize; // exactly 1 board square
   const minimizedHeight = Math.round(cellSize / 2);
-  const infoRowHeight = minimizedHeight; // top row = 1/2 cellSize
-  const figuresAreaHeight = enlargedHeight - infoRowHeight; // bottom area = 2/3 cellSize
 
-  // Figure slot size adapts to the available vertical space.
-  const enlargedSlotSize = Math.min(figuresAreaHeight - 4, cellSize * 0.55);
+  // Figure slot adapts to full panel height in enlarged mode.
+  const enlargedSlotSize = Math.min(cellSize - 8, cellSize * 0.85);
   const minimizedSlotSize = Math.max(16, minimizedHeight - 8);
 
   const hasWinTarget = winTargets.length > 0;
 
-  // The opponent offered a draw → this player's panel shows Accept/Reject.
-  const opponentOfferedDraw = drawOfferFrom !== null && drawOfferFrom !== playerId;
-
-  // Translucent background from the player's color.
   const bgColor = hexToRgba(playerColor, 0.35);
   const bgColorWin = hexToRgba(playerColor, 0.55);
-
-  // Button gradient: vertical, player-color, fully opaque.
-  const btnStyle: React.CSSProperties = {
-    background: `linear-gradient(to bottom, ${playerColor}, ${hexToRgba(playerColor, 0.7)})`,
-    borderColor: playerColor,
-    color: '#fff',
-  };
-
-  const opponentBg = hexToRgba(opponentColor, 0.35);
 
   const currentHeight = isEnlarged ? enlargedHeight : minimizedHeight;
   const currentBg = hasWinTarget && !isEnlarged ? bgColorWin : bgColor;
@@ -155,49 +108,12 @@ export function PlayerPanel({
         }
       }}
     >
-      {/* ── Enlarged content ────────────────────────────── */}
+      {/* ── Enlarged content: figures + separator + hamburger ── */}
       <div
         className={styles.enlargedContent}
         style={{ opacity: isEnlarged ? 1 : 0, pointerEvents: isEnlarged ? 'auto' : 'none' }}
       >
-        {/* Top info row: name, action buttons, timer */}
-        <div className={styles.infoRow} style={{ height: infoRowHeight }}>
-          <span
-            className={styles.playerName}
-            style={{ color: playerColor, maxWidth: boardPixelWidth / 2 }}
-          >
-            {playerName}
-          </span>
-
-          {isPlaying && (
-            <div className={styles.buttons}>
-              <button className={styles.actionBtn} style={btnStyle} onClick={onGiveUp} title="Give up">
-                ⚑
-              </button>
-              <button className={styles.actionBtn} style={btnStyle} onClick={onOfferDraw} title="Offer draw">
-                ½
-              </button>
-              <button className={styles.actionBtn} style={btnStyle} onClick={onExit} title="Exit">
-                ←
-              </button>
-            </div>
-          )}
-
-          {!isPlaying && (
-            <div className={styles.buttons}>
-              <button className={styles.actionBtn} style={btnStyle} onClick={onExit} title="Exit game">
-                ←
-              </button>
-            </div>
-          )}
-
-          <span className={styles.timer} style={{ color: playerColor }}>
-            {timer}
-          </span>
-        </div>
-
-        {/* Figures area — horizontally centered */}
-        <div className={styles.figuresArea} style={{ height: figuresAreaHeight }}>
+        <div className={styles.figuresArea}>
           {myFigures.map((instance) => (
             <CompactFigureSlot
               key={instance.instanceId}
@@ -206,6 +122,7 @@ export function PlayerPanel({
               isActive={isActive}
               playerColor={playerColor}
               size={enlargedSlotSize}
+              flipped={false}
               onClick={() => {
                 if (isActive && instance.status === 'available') {
                   onSelectFigure(instance.instanceId);
@@ -214,6 +131,21 @@ export function PlayerPanel({
             />
           ))}
         </div>
+
+        {isPlaying && (
+          <>
+            <div className={styles.separator} />
+            <button
+              className={styles.hamburgerBtn}
+              onClick={(e) => { e.stopPropagation(); onMenuToggle(); }}
+              title="Menu"
+            >
+              <span className={styles.hamburgerLine} />
+              <span className={styles.hamburgerLine} />
+              <span className={styles.hamburgerLine} />
+            </button>
+          </>
+        )}
       </div>
 
       {/* ── Minimized content ───────────────────────────── */}
@@ -228,50 +160,24 @@ export function PlayerPanel({
           {playerName}
         </span>
 
-        {opponentOfferedDraw && isPlaying && (
-          <div className={styles.drawOfferButtons}>
-            <button
-              className={styles.drawAcceptBtn}
-              style={{ background: opponentBg }}
-              onClick={(e) => { e.stopPropagation(); onAcceptDraw(); }}
-            >
-              Accept draw
-            </button>
-            <button
-              className={styles.drawRejectBtn}
-              style={{ background: opponentBg }}
-              onClick={(e) => { e.stopPropagation(); onRejectDraw(); }}
-            >
-              Reject
-            </button>
-          </div>
-        )}
-
-        {!opponentOfferedDraw && (
-          <div className={styles.figuresRow}>
-            {myFigures.map((instance) => (
-              <CompactFigureSlot
-                key={instance.instanceId}
-                instance={instance}
-                isSelected={instance.instanceId === selectedInstanceId}
-                isActive={isActive}
-                playerColor={playerColor}
-                size={minimizedSlotSize}
-                onClick={() => {
-                  if (isActive && instance.status === 'available') {
-                    onSelectFigure(instance.instanceId);
-                  }
-                }}
-              />
-            ))}
-          </div>
-        )}
-
-        {timer && (
-          <span className={styles.timerMin} style={{ color: playerColor }}>
-            {timer}
-          </span>
-        )}
+        <div className={styles.figuresRow}>
+          {myFigures.map((instance) => (
+            <CompactFigureSlot
+              key={instance.instanceId}
+              instance={instance}
+              isSelected={instance.instanceId === selectedInstanceId}
+              isActive={isActive}
+              playerColor={playerColor}
+              size={minimizedSlotSize}
+              flipped={false}
+              onClick={() => {
+                if (isActive && instance.status === 'available') {
+                  onSelectFigure(instance.instanceId);
+                }
+              }}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -301,6 +207,8 @@ interface CompactFigureSlotProps {
   playerColor: string;
   /** Slot diameter in pixels. */
   size: number;
+  /** Whether to render the figure icon upside-down. */
+  flipped: boolean;
   onClick: () => void;
 }
 
@@ -317,6 +225,7 @@ function CompactFigureSlot({
   isActive,
   playerColor,
   size,
+  flipped,
   onClick,
 }: CompactFigureSlotProps) {
   const isClickable = isActive && instance.status === 'available';
@@ -345,7 +254,7 @@ function CompactFigureSlot({
         figureTypeId={instance.figureTypeId}
         color={playerColor}
         size={Math.max(12, size - 4)}
-        flipped={instance.playerId === 'p2'}
+        flipped={flipped}
       />
 
       {instance.status === 'taken' && (

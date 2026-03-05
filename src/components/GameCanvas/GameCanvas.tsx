@@ -70,22 +70,28 @@ export function GameCanvas() {
   //
   // Width budget: just the board width + small padding.
   const [cellSize, setCellSize] = useState(64);
+  const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null);
+  const hasTimer = level.timerMinutes > 0;
 
   useEffect(() => {
     const compute = () => {
-      const availH = window.innerHeight - 40;
+      const bannerReserve = phase === 'finished' || phase === 'draw' ? 56 : 0;
+      const availH = window.innerHeight - bannerReserve;
       const availW = window.innerWidth - 32;
       // Total cell-units vertically: board + both panels (no finish zones)
-      const cellUnitsH = level.boardHeight + 1.5 + 1 / 2;
+      const cellUnitsH = level.boardHeight + 1 + 0.5;
       const fromHeight = Math.floor(availH / cellUnitsH);
-      const fromWidth = Math.floor(availW / level.boardWidth);
+      const widthGapsPx = level.boardWidth - 1;
+      const timerUnits = hasTimer ? 0.4 : 0;
+      const widthUnits = level.boardWidth + timerUnits;
+      const fromWidth = Math.floor((availW - widthGapsPx) / widthUnits);
       setCellSize(Math.max(24, Math.min(fromHeight, fromWidth)));
     };
 
     compute();
     window.addEventListener('resize', compute);
     return () => window.removeEventListener('resize', compute);
-  }, [level.boardWidth, level.boardHeight]);
+  }, [level.boardWidth, level.boardHeight, hasTimer, phase]);
   // ────────────────────────────────────────────────────────────
 
   // ── Per-player countdown timers ─────────────────────────
@@ -93,7 +99,6 @@ export function GameCanvas() {
   // timers are stored in the Zustand store; tickTimer() decrements.
   // Timer is paused when a draw offer is pending or timerMinutes === 0.
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const hasTimer = level.timerMinutes > 0;
 
   useEffect(() => {
     // Start ticking after the first move, only when timer is enabled.
@@ -127,16 +132,12 @@ export function GameCanvas() {
     window.addEventListener('keydown', back);
     return () => window.removeEventListener('keydown', back);
   }, [phase, resetGame]);
-  // ────────────────────────────────────────────────────────────
 
-  /**
-   * formatTime turns elapsed seconds into a MM:SS string.
-   */
-  function formatTime(seconds: number): string {
-    const m = Math.floor(seconds / 60).toString().padStart(2, '0');
-    const s = (seconds % 60).toString().padStart(2, '0');
-    return `${m}:${s}`;
-  }
+  // Close the sandwich menu when the turn changes or game phase changes.
+  useEffect(() => {
+    setMenuOpenFor(null);
+  }, [currentPlayerIndex, phase]);
+  // ────────────────────────────────────────────────────────────
 
   /** is called when the user clicks an empty (or highlighted) cell.
    *
@@ -204,8 +205,19 @@ export function GameCanvas() {
 
   // +gaps: 1px gap between each column = (boardWidth - 1) extra pixels
   const boardPixelWidth = level.boardWidth * cellSize + (level.boardWidth - 1);
-  const p1Timer = hasTimer ? formatTime(playerTimers[0]) : '';
-  const p2Timer = hasTimer ? formatTime(playerTimers[1]) : '';
+  const boardPixelHeight = level.boardHeight * cellSize + (level.boardHeight - 1);
+
+  // Timer bar percentages (0–100)
+  const totalTimerSec = level.timerMinutes * 60;
+  const p1TimerPct = totalTimerSec > 0 ? (playerTimers[0] / totalTimerSec) * 100 : 100;
+  const p2TimerPct = totalTimerSec > 0 ? (playerTimers[1] / totalTimerSec) * 100 : 100;
+  const timerBarW = Math.round(cellSize / 5);
+
+  function formatTime(seconds: number): string {
+    const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+    const s = (seconds % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  }
 
   // Player 1 (bottom, index 0) is enlarged when it's their turn.
   // Player 2 (top, index 1) is enlarged when it's their turn.
@@ -242,67 +254,155 @@ export function GameCanvas() {
 
       {/* ── Main vertical stack ────────────────────────────── */}
       <div className={styles.stack}>
-        {/* Player 2 panel (top) */}
+        {/* Player 2 panel (top) — full width including timer bar areas */}
         <PlayerPanel
           playerId={players[1].id}
           playerName={players[1].name}
           playerColor={PlayerColors[players[1].id]}
-          opponentColor={PlayerColors[players[0].id]}
           figures={figures}
           isActive={currentPlayerIndex === 1 && phase === 'playing'}
           isEnlarged={p2Enlarged}
           selectedInstanceId={selectedInstanceId}
           onSelectFigure={selectAvailableFigure}
-          onGiveUp={() => forfeit(players[1].id)}
-          onOfferDraw={() => offerDraw(players[1].id)}
-          onAcceptDraw={acceptDraw}
-          onRejectDraw={rejectDraw}
-          drawOfferFrom={drawOfferFrom}
-          onExit={resetGame}
-          timer={p2Timer}
+          onMenuToggle={() => setMenuOpenFor((p) => p === players[1].id ? null : players[1].id)}
           cellSize={cellSize}
-          boardPixelWidth={boardPixelWidth}
+          boardPixelWidth={hasTimer ? boardPixelWidth + timerBarW * 2 : boardPixelWidth}
           isPlaying={phase === 'playing'}
           winTargets={topPanelWinTargets}
           onWinClick={handleCellClick}
           flipped={againstView}
         />
 
-        {/* Board */}
-        <Board
-          level={level}
-          figures={figures}
-          playerColors={PlayerColors}
-          cellSize={cellSize}
-          selectedInstanceId={selectedInstanceId}
-          validMoveTargets={validMoveTargets}
-          onCellClick={handleCellClick}
-          onFigureClick={handleFigureClick}
-        />
+        {/* Board row: timer bar | board + overlays | timer bar */}
+        <div className={styles.boardRow}>
+          {/* P1 Timer bar — left side */}
+          {hasTimer && (
+            <div
+              className={styles.timerBar}
+              style={{ width: timerBarW, height: boardPixelHeight }}
+            >
+              <div
+                className={styles.timerBarFill}
+                style={{
+                  bottom: 0,
+                  height: `${p1TimerPct}%`,
+                  background: PlayerColors[players[0].id] + '80',
+                }}
+              />
+              <span className={styles.timerText}>{formatTime(playerTimers[0])}</span>
+            </div>
+          )}
 
-        {/* Player 1 panel (bottom) */}
+          {/* Board area with overlays */}
+          <div className={styles.boardWrapper} style={{ width: boardPixelWidth, height: boardPixelHeight }}>
+            <Board
+              level={level}
+              figures={figures}
+              playerColors={PlayerColors}
+              cellSize={cellSize}
+              selectedInstanceId={selectedInstanceId}
+              validMoveTargets={validMoveTargets}
+              onCellClick={handleCellClick}
+              onFigureClick={handleFigureClick}
+            />
+
+            {/* Sandwich-menu overlay */}
+            {menuOpenFor && phase === 'playing' && (
+              <>
+                <div className={styles.menuBackdrop} onClick={() => setMenuOpenFor(null)} />
+                <div
+                  className={styles.menuPanel}
+                  style={{
+                    width: boardPixelWidth,
+                    height: Math.round(boardPixelHeight / 3),
+                    ...(menuOpenFor === players[0].id ? { bottom: 0 } : { top: 0 }),
+                  }}
+                >
+                  <span className={styles.menuPlayerName}>
+                    {menuOpenFor === players[0].id ? players[0].name : players[1].name}
+                  </span>
+                  <div className={styles.menuButtons}>
+                    <button
+                      className={styles.menuBtn}
+                      onClick={() => { forfeit(menuOpenFor); setMenuOpenFor(null); }}
+                    >
+                      Give Up
+                    </button>
+                    <button
+                      className={styles.menuBtn}
+                      onClick={() => { offerDraw(menuOpenFor); setMenuOpenFor(null); }}
+                    >
+                      Offer Draw
+                    </button>
+                    <button
+                      className={styles.menuBtn}
+                      onClick={() => { resetGame(); }}
+                    >
+                      Exit Game
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Draw response panel (opponent accepts / declines) */}
+            {drawOfferFrom && phase === 'playing' && !menuOpenFor && (
+              <div
+                className={styles.drawPanel}
+                style={{
+                  width: boardPixelWidth,
+                  height: cellSize * 2,
+                  ...(drawOfferFrom === players[0].id ? { top: 0 } : { bottom: 0 }),
+                }}
+              >
+                <span className={styles.drawPanelText}>Draw offered</span>
+                <div className={styles.drawPanelButtons}>
+                  <button className={styles.menuBtn} onClick={acceptDraw}>
+                    Accept
+                  </button>
+                  <button className={styles.menuBtn} onClick={rejectDraw}>
+                    Decline
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* P2 Timer bar — right side */}
+          {hasTimer && (
+            <div
+              className={styles.timerBar}
+              style={{ width: timerBarW, height: boardPixelHeight }}
+            >
+              <div
+                className={styles.timerBarFill}
+                style={{
+                  top: 0,
+                  height: `${p2TimerPct}%`,
+                  background: PlayerColors[players[1].id] + '80',
+                }}
+              />
+              <span className={styles.timerText}>{formatTime(playerTimers[1])}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Player 1 panel (bottom) — full width including timer bar areas */}
         <PlayerPanel
           playerId={players[0].id}
           playerName={players[0].name}
           playerColor={PlayerColors[players[0].id]}
-          opponentColor={PlayerColors[players[1].id]}
           figures={figures}
           isActive={currentPlayerIndex === 0 && phase === 'playing'}
           isEnlarged={p1Enlarged}
           selectedInstanceId={selectedInstanceId}
           onSelectFigure={selectAvailableFigure}
-          onGiveUp={() => forfeit(players[0].id)}
-          onOfferDraw={() => offerDraw(players[0].id)}
-          onAcceptDraw={acceptDraw}
-          onRejectDraw={rejectDraw}
-          drawOfferFrom={drawOfferFrom}
+          onMenuToggle={() => setMenuOpenFor((p) => p === players[0].id ? null : players[0].id)}
+          cellSize={cellSize}
+          boardPixelWidth={hasTimer ? boardPixelWidth + timerBarW * 2 : boardPixelWidth}
+          isPlaying={phase === 'playing'}
           winTargets={bottomPanelWinTargets}
           onWinClick={handleCellClick}
-          onExit={resetGame}
-          timer={p1Timer}
-          cellSize={cellSize}
-          boardPixelWidth={boardPixelWidth}
-          isPlaying={phase === 'playing'}
         />
       </div>
     </div>
