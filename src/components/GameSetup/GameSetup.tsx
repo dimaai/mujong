@@ -35,12 +35,13 @@ export function GameSetup() {
 
   // Local form state — only lives while the setup form is visible.
   // useState(initialValue) returns [currentValue, setterFunction].
-  const [selectedLevelId, setSelectedLevelId] = useState(LEVELS[0].levelId);
+  const defaultLevel = LEVELS[LEVELS.length - 1];
+  const [selectedLevelId, setSelectedLevelId] = useState(defaultLevel.levelId);
   const [p1Name, setP1Name] = useState('Player 1');
   const [p2Name, setP2Name] = useState('Player 2');
   const [timerMinutes, setTimerMinutes] = useState(5);
-  const [p1Color, setP1Color] = useState(LEVELS[0].player1Color);
-  const [p2Color, setP2Color] = useState(LEVELS[0].player2Color);
+  const [p1Color, setP1Color] = useState(defaultLevel.player1Color);
+  const [p2Color, setP2Color] = useState(defaultLevel.player2Color);
   const [againstView, setAgainstView] = useState(false);
 
   // When the user picks a different level, update the default colors.
