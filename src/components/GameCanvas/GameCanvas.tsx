@@ -51,34 +51,25 @@ export function GameCanvas() {
     tickTimer,
   } = useGameStore();
 
-  // If no game is running, show a placeholder (GameSetup handle this case).
-  if (!game) {
-    return <div className={styles.empty}>No game in progress.</div>;
-  }
+  // ── All hooks MUST be declared before any conditional return ──
+  // React requires hooks to be called in the same order on every
+  // render. Placing them after an early return violates this rule
+  // and causes leaked intervals / event listeners between games.
 
-  const { level, players, currentPlayerIndex, figures, phase, winnerId, drawOfferFrom, playerTimers, againstView } = game;
-  const currentPlayer = players[currentPlayerIndex];
-
-  // ── Responsive cell size ──────────────────────────────────
-  // Vertical layout: P2 panel + board + P1 panel + banner area.
-  //
-  // Height budget (in cell-size units):
-  //   board grid:    boardHeight
-  //   enlarged panel: +1.5  (active player)
-  //   minimized panel: +0.5 (inactive player)
-  //   banner/padding: ~40px fixed
-  //
-  // Width budget: just the board width + small padding.
   const [cellSize, setCellSize] = useState(64);
   const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null);
-  const hasTimer = level.timerMinutes > 0;
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // ── Responsive cell size ──────────────────────────────────
   useEffect(() => {
+    if (!game) return;
+    const { level, phase } = game;
+    const hasTimer = level.timerMinutes > 0;
+
     const compute = () => {
       const bannerReserve = phase === 'finished' || phase === 'draw' ? 56 : 0;
       const availH = window.innerHeight - bannerReserve;
       const availW = window.innerWidth - 32;
-      // Total cell-units vertically: board + both panels (no finish zones)
       const cellUnitsH = level.boardHeight + 1 + 0.5;
       const fromHeight = Math.floor(availH / cellUnitsH);
       const widthGapsPx = level.boardWidth - 1;
@@ -91,25 +82,21 @@ export function GameCanvas() {
     compute();
     window.addEventListener('resize', compute);
     return () => window.removeEventListener('resize', compute);
-  }, [level.boardWidth, level.boardHeight, hasTimer, phase]);
+  }, [game]);
   // ────────────────────────────────────────────────────────────
 
   // ── Per-player countdown timers ─────────────────────────
-  // Each player's timer counts down only when it's their turn.
-  // timers are stored in the Zustand store; tickTimer() decrements.
-  // Timer is paused when a draw offer is pending or timerMinutes === 0.
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
   useEffect(() => {
-    // Start ticking after the first move, only when timer is enabled.
-    if (hasTimer && game.history.length > 0 && phase === 'playing' && !drawOfferFrom) {
+    if (!game) return;
+    const hasTimer = game.level.timerMinutes > 0;
+
+    if (hasTimer && game.history.length > 0 && game.phase === 'playing' && !game.drawOfferFrom) {
       if (!intervalRef.current) {
         intervalRef.current = setInterval(() => {
           tickTimer();
         }, 1000);
       }
     } else {
-      // Pause: game ended, draw offer pending, or no timer.
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
@@ -122,21 +109,31 @@ export function GameCanvas() {
         intervalRef.current = null;
       }
     };
-  }, [hasTimer, game.history.length, phase, drawOfferFrom, tickTimer]);
+  }, [game, tickTimer]);
 
-  // When the game is over, any key press or tap anywhere returns to main menu.
+  // When the game is over, any key press returns to main menu.
   useEffect(() => {
-    if (phase !== 'finished' && phase !== 'draw') return;
+    if (!game) return;
+    if (game.phase !== 'finished' && game.phase !== 'draw') return;
 
     const back = () => resetGame();
     window.addEventListener('keydown', back);
     return () => window.removeEventListener('keydown', back);
-  }, [phase, resetGame]);
+  }, [game, resetGame]);
 
   // Close the sandwich menu when the turn changes or game phase changes.
   useEffect(() => {
     setMenuOpenFor(null);
-  }, [currentPlayerIndex, phase]);
+  }, [game?.currentPlayerIndex, game?.phase]);
+
+  // ── Early return AFTER all hooks ──────────────────────────
+  if (!game) {
+    return <div className={styles.empty}>No game in progress.</div>;
+  }
+
+  const { level, players, currentPlayerIndex, figures, phase, winnerId, drawOfferFrom, playerTimers, againstView } = game;
+  const currentPlayer = players[currentPlayerIndex];
+  const hasTimer = level.timerMinutes > 0;
   // ────────────────────────────────────────────────────────────
 
   /** is called when the user clicks an empty (or highlighted) cell.
