@@ -66,6 +66,21 @@ export interface Player {
 }
 
 /**
+ * A persisted, device-local *profile* the user edits on the main menu.
+ * Distinct from `Player` (a runtime participant in a game session):
+ * `Profile` is what the user sees in the lobby/settings; it gets copied
+ * into a `Player` when a game actually starts.
+ *
+ * Kept intentionally tiny so it is safe to sync to the cloud later.
+ */
+export interface Profile {
+  /** Display name shown in panels and lobby. */
+  name: string;
+  /** CSS color string used as the player's accent color. */
+  color: string;
+}
+
+/**
  * Specifies how many of a given FigureType each player gets in a level.
  * e.g. { figureTypeId: 'ft_runner', quantity: 2 } → 2 Runners per player.
  */
@@ -195,4 +210,60 @@ export interface GameState {
    * so two players can sit across from each other on one screen.
    */
   againstView: boolean;
+}
+
+// ── Settings (Step 3) ─────────────────────────────────────────
+//
+// These types describe the *user-configurable* options the player
+// edits in the (future) Settings screen. They live ALONGSIDE the
+// existing `Level` type — `Level` is the legacy, fully-baked level
+// definition still used by the current game flow; `GameOptions`
+// is the new shape that will replace it once Phase B wires the
+// Settings UI and Phase C splits difficulty / board size apart.
+//
+// Keeping both in parallel lets us land Step 3 with zero gameplay
+// regressions: nothing reads `GameOptions` yet.
+
+/**
+ * Difficulty selects which roster of pieces each player gets.
+ * The mapping `Difficulty → AllowedFigure[]` is defined in Phase C
+ * (see ARCHITECTURE.md §3) — this type just names the choices.
+ */
+export type Difficulty = 'beginner' | 'normal' | 'advanced';
+
+/**
+ * A named board-dimensions preset shown in the Settings screen.
+ * `id` is what we persist (stable, machine-readable);
+ * `label` is what we render to the user.
+ */
+export interface BoardSizePreset {
+  /** Stable identifier persisted in `GameOptions.boardSizeId`. */
+  id: string;
+  /** Human-friendly label, e.g. "Medium (8 × 10)". */
+  label: string;
+  /** Number of columns (X-axis). */
+  width: number;
+  /** Number of rows (Y-axis). */
+  height: number;
+}
+
+/**
+ * The persisted bundle of user-tweakable game settings.
+ *
+ * NOTE: per IMPLEMENTATION_PLAN.md Step 3 we intentionally exclude
+ * player names and colors here — those live in `Profile` (see the
+ * `Profile` type above) so they can be edited and synced
+ * independently of the per-game settings.
+ */
+export interface GameOptions {
+  /** Which roster of pieces both players receive. */
+  difficulty: Difficulty;
+  /** Lookup key into the `BOARD_SIZE_MAP` registry. */
+  boardSizeId: string;
+  /** Per-player clock in minutes. 0 disables the timer entirely. */
+  timerMinutes: number;
+  /** When true, the top player's UI is flipped 180° (shared device). */
+  againstView: boolean;
+  /** When true, two blocking walls are placed on the middle row. */
+  walls: boolean;
 }
