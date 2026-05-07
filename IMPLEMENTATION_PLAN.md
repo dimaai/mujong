@@ -76,6 +76,80 @@ Companion to [ARCHITECTURE.md](ARCHITECTURE.md). Work is sliced into small, inde
 
 ---
 
+## Next 5 steps (continue here, after Step 5 lands)
+
+### Step 6 — Settings route + form (read/write `useSettingsStore`)
+1. **Step name:** Add a real `/settings` route that edits `GameOptions` and persists via Step 3's store.
+2. **Files involved:**
+   - `src/app/settings/page.tsx` *(new — renders `<Settings />`)*
+   - `src/components/Settings/Settings.tsx` *(new)*
+   - `src/components/Settings/Settings.module.css` *(new)*
+   - `src/components/MainMenu/MainMenu.tsx` *(touch — un-stub the "Settings" button to navigate to `/settings`)*
+3. **What will be implemented:**
+   - Form controls for every field on `GameOptions`:
+     - `difficulty` — segmented control: Beginner / Normal / Advanced.
+     - `boardSizeId` — segmented control fed by [src/data/boardSizes.ts](src/data/boardSizes.ts).
+     - `timerMinutes` — number input (0 = off).
+     - `againstView` — toggle (per ARCHITECTURE §4: orient board so each player faces their own pieces).
+     - `walls` — toggle.
+   - **Save / Cancel** semantics: on mount, snapshot `useSettingsStore.getState().options`; "Save" calls `save(form)`, "Cancel" navigates back without writing.
+   - No gameplay wiring yet — Start Game still uses the hard-coded `Level` from Step 5. This step only proves the store round-trips through a real UI.
+4. **STOP condition:** `npm run dev` → MainMenu → Settings → change every field → Save → reload → Settings reopens with the saved values. Cancel discards changes. `npm run type-check` and `npm run lint` pass.
+
+### Step 7 — Wire Start Game to `useSettingsStore` (replace hard-coded `Level`)
+1. **Step name:** MainMenu's Start button reads the live `GameOptions` instead of `LEVELS[1]`.
+2. **Files involved:**
+   - `src/components/MainMenu/MainMenu.tsx` *(touch)*
+   - `src/store/gameStore.ts` *(touch — `startGame` accepts `GameOptions` + `Profile[2]` instead of a single `Level`)*
+   - `src/domain/board.ts` *(touch — `createInitialState` accepts `{ boardSize, allowedFigures, players }` derived from `GameOptions` + difficulty mapping)*
+   - `src/data/levels.ts` *(touch — keep file for now but mark deprecated in a top comment; Phase I deletes it)*
+3. **What will be implemented:**
+   - Difficulty → `allowedFigures` mapping lives in a new helper `getFigureRosterFor(difficulty)` in [src/data/figuretypes.ts](src/data/figuretypes.ts) (or a new `src/data/difficulty.ts` if that file is too crowded — pick the smaller diff).
+   - `boardSizeId` → `{ rows, cols }` via [src/data/boardSizes.ts](src/data/boardSizes.ts).
+   - Player names + colors come from `useProfileStore`. Walls and timer are read but not yet honoured by the rules engine (walls land in Step 9; timer is display-only for now).
+   - `useGameStore.startGame` signature changes from `startGame(level)` to `startGame({ options, profiles })`; all call sites updated in this step.
+4. **STOP condition:** Changing any setting in `/settings`, returning to MainMenu and pressing Start produces a board that reflects those settings (correct size, correct piece roster, correct names/colors). Existing single-device gameplay still works end-to-end.
+
+### Step 8 — `Walls` in the domain (state + deterministic placement, no rendering yet)
+1. **Step name:** Make walls a first-class part of `GameState` and the rules engine.
+2. **Files involved:**
+   - `src/domain/types.ts` *(touch — add `walls: Position[]` to `GameState`; add `WallCell` discriminator if a `BoardCell` union is used)*
+   - `src/domain/board.ts` *(touch — `placeWalls(boardSize): Position[]` deterministic helper; `createInitialState` consumes `options.walls`)*
+   - `src/domain/rules.ts` *(touch — `getValidMoves` and `getValidPlacements` treat wall cells as blocked; `canJump` figures may pass over walls per ARCHITECTURE §4.2 pending the open clarification — implement the "blocks all, jumpable by `canJump`" branch and leave a `// TODO(Q-walls)` if the clarification flips it)*
+   - `src/domain/__tests__/walls.test.ts` *(new — table-driven tests for blocked moves, blocked placements, and jumper-over-wall)*
+3. **What will be implemented:**
+   - `placeWalls` puts two walls symmetrically on the middle row(s) so the layout is identical for both players (deterministic, no RNG).
+   - Rules helpers consult `state.walls` via a `Set<string>` of `"r,c"` for O(1) lookup.
+   - Board rendering is **not** touched yet — walls exist in state but are invisible. This keeps the rules change isolated and reviewable.
+4. **STOP condition:** New unit tests pass. Starting a game with `walls: true` produces a `GameState` whose `walls` array has the expected positions, and a manual test (paint walls red in DevTools by editing CSS, or log them) confirms moves into wall squares are rejected. `npm run type-check`, `npm run lint`, and tests all green.
+
+### Step 9 — Render walls on the board
+1. **Step name:** Make walls visible and skip them in placement/move highlighting.
+2. **Files involved:**
+   - `src/components/Board/Board.tsx` *(touch — render a `WallCell` variant for any position in `state.walls`)*
+   - `src/components/Board/Board.module.css` *(touch — `.wall` style: distinct from valid/invalid highlights, accessible contrast)*
+3. **What will be implemented:**
+   - For each cell, check the wall set built in Step 8 and render a non-interactive cell (no click handler, `aria-label="Wall"`).
+   - Valid-move and valid-placement highlights skip wall cells (already enforced in domain — UI just trusts the rules output).
+   - No new domain logic; this step is purely presentational.
+4. **STOP condition:** Toggling `walls` in Settings and starting a game shows two clearly distinguishable wall cells on the middle row that cannot be clicked, cannot receive a placement, and cannot be moved into. Screenshot attached to the PR.
+
+### Step 10 — In-progress game persistence + "Resume" entry point
+1. **Step name:** Snapshot `GameState` to local storage so a reload (or "Add to Home Screen" relaunch) doesn't lose the game.
+2. **Files involved:**
+   - `src/store/gameStore.ts` *(touch — write/clear an envelope under `STORAGE_KEYS.gameInProgress` on every `executeAction` and on `endGame`)*
+   - `src/persistence/keys.ts` *(touch — add `gameInProgress: 'mojong.game.v1'`)*
+   - `src/components/MainMenu/MainMenu.tsx` *(touch — show a "Resume game" button when an envelope exists)*
+   - `src/app/play/page.tsx` *(touch — on mount, if no in-memory game but a persisted envelope exists, hydrate the store from it)*
+3. **What will be implemented:**
+   - Use the `Persisted<T>` envelope from Step 1 — same shape, no special-case storage.
+   - Snapshot is debounced (e.g. `requestIdleCallback` fallback to `setTimeout(0)`) to avoid blocking the UI on every move.
+   - On `endGame`, the envelope is removed so MainMenu doesn't keep offering to resume a finished match.
+   - Schema-version guard: if the persisted `v` doesn't match the current `Persisted` version, delete the envelope and continue (no migration in v1).
+4. **STOP condition:** Start a game, make a few moves, refresh the browser → MainMenu shows "Resume game" → clicking it returns to `/play` with the exact same `GameState`. Finishing the game and returning to MainMenu hides the Resume button. Persistence is verified to survive a full PWA relaunch on iOS (Add to Home Screen → close → reopen).
+
+---
+
 ## Subsequent phases (for context only — not the next 5 steps)
 
 These are listed so reviewers see the shape of the work. They are **not** approved yet and will be sliced into their own small steps when their turn comes. Order is suggested, not contractual.
