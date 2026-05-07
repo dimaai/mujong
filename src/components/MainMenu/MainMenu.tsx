@@ -8,7 +8,7 @@
 //       useProfileStore so values persist across reloads).
 //     - "Start Game"        → starts a new game and navigates to /play
 //     - "Network Game"      → disabled stub (Phase G)
-//     - "Settings"          → disabled stub (Phase B)
+//     - "Settings"          → navigates to /settings (Step 6)
 //     - "Tutorial"          → disabled stub (Phase I)
 //
 // SCOPE NOTE (Step 5)
@@ -164,8 +164,7 @@ export function MainMenu() {
           <button
             type="button"
             className={styles.secondaryButton}
-            disabled
-            title="Coming soon"
+            onClick={() => router.push('/settings')}
           >
             Settings
           </button>
