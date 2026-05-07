@@ -20,20 +20,23 @@
 // ============================================================
 
 import React from 'react';
-import { GameSetup } from '../components/GameSetup/GameSetup';
+import { MainMenu } from '../components/MainMenu/MainMenu';
 
 /**
- * The home page — renders the game setup / game canvas.
- * No props are needed here; Next.js calls this function directly.
+ * The home page — renders the main menu.
+ *
+ * Step 5 split the old monolithic GameSetup into two routes:
+ *   "/"      → MainMenu (this file): names, colors, action buttons.
+ *   "/play"  → GameCanvas: the live board, only reachable when a
+ *              game exists in the Zustand store.
+ *
+ * The legacy GameSetup component is intentionally left in place
+ * (no longer imported) so it can be deleted cleanly in a follow-up.
  */
 export default function HomePage() {
   return (
     <main>
-      {/*
-       * GameSetup handles both the pre-game form and the live GameCanvas.
-       * It reads `game` from Zustand: null → show form, non-null → show board.
-       */}
-      <GameSetup />
+      <MainMenu />
     </main>
   );
 }

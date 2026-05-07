@@ -1,0 +1,136 @@
+/* MainMenu.module.css
+   Mirrors GameSetup styling so the visual language stays consistent
+   while we migrate routes. Will be polished in a later step. */
+
+.menuWrapper {
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  min-height: 100vh;
+  justify-content: center;
+}
+
+.logo {
+  width: auto;
+  height: auto;
+  max-width: 280px;
+  object-fit: contain;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 340px;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 20px 24px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.field label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #b8a8d4;
+}
+
+.field input,
+.field select {
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  color: #fff;
+  font-size: 14px;
+}
+
+.nameRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.nameRow input[type='text'] {
+  flex: 1;
+}
+
+.colorTile {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+  /* Strip the browser's default chrome so the swatch fills the tile
+     and we can round its corners via the pseudo-elements below. */
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+}
+
+/* WebKit/Blink (Chrome, Edge, Safari) — round the inner color swatch.
+   Without these rules the swatch renders as a square inside the tile. */
+.colorTile::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.colorTile::-webkit-color-swatch {
+  border: none;
+  border-radius: 9px;
+}
+
+/* Firefox equivalent. */
+.colorTile::-moz-color-swatch {
+  border: none;
+  border-radius: 9px;
+}
+
+.buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.startButton {
+  padding: 12px 16px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, #7c3aed, #4f46e5);
+  border: 0;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.startButton:hover {
+  filter: brightness(1.08);
+}
+
+.secondaryButton {
+  padding: 10px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #d6cdee;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.secondaryButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
