@@ -28,7 +28,7 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-import { useSettingsStore } from '../../store/settingsStore';
+import { useSettingsStore, useSettingsHydrated } from '../../store/settingsStore';
 import { BOARD_SIZES } from '../../data/boardSizes';
 import type { Difficulty, GameOptions } from '../../domain/types';
 
@@ -57,13 +57,29 @@ export function Settings() {
   const router = useRouter();
   const save = useSettingsStore((s) => s.save);
 
-  // Snapshot the persisted options once, on mount, so Cancel can
-  // truly discard edits. We deliberately do NOT subscribe to
-  // `options` here — re-renders from another tab writing the same
-  // store would clobber the user's in-progress edits otherwise.
+  // Gate the entire form on rehydration — same pattern MainMenu
+  // uses. We render a layout-stable placeholder on the server and
+  // on the very first client paint, then swap in the real form
+  // once `useSettingsStore` has finished reading localStorage.
+  const hydrated = useSettingsHydrated();
+
+  // Local form state. The initializer runs once, on first render
+  // of THIS component. Because we render-and-bail above when
+  // `!hydrated`, the form stays mounted only after rehydration —
+  // but `useState` was still seeded on the very first mount with
+  // the (default) store snapshot. We therefore reset it via
+  // `useEffect` the moment hydration completes, guaranteeing the
+  // user only ever sees their persisted values, never defaults.
   const [form, setForm] = useState<GameOptions>(
     () => useSettingsStore.getState().options,
   );
+  const seededRef = React.useRef(false);
+  React.useEffect(() => {
+    if (hydrated && !seededRef.current) {
+      seededRef.current = true;
+      setForm(useSettingsStore.getState().options);
+    }
+  }, [hydrated]);
 
   /**
    * patch
@@ -102,6 +118,16 @@ export function Settings() {
    */
   function handleCancel() {
     router.push('/');
+  }
+
+  // Pre-hydration placeholder — identical outer wrapper so layout
+  // doesn't shift when the real form swaps in. Returning here AFTER
+  // declaring all hooks above keeps the hook order stable across
+  // renders (React's rules-of-hooks requirement).
+  if (!hydrated) {
+    return (
+      <div className={styles.wrapper} aria-busy="true" aria-live="polite" />
+    );
   }
 
   return (

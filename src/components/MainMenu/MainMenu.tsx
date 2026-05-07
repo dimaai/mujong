@@ -11,12 +11,11 @@
 //     - "Settings"          → navigates to /settings (Step 6)
 //     - "Tutorial"          → disabled stub (Phase I)
 //
-// SCOPE NOTE (Step 5)
-//   To keep gameplay byte-for-byte identical, Start Game uses a
-//   hard-coded Level (LEVELS[1] — the existing default in the old
-//   GameSetup). Settings-driven board size / difficulty arrives
-//   in Phase B. The legacy GameSetup file stays in place; it is
-//   simply no longer imported.
+// SCOPE NOTE (Step 7)
+//   Start Game now reads the live `GameOptions` from
+//   `useSettingsStore` (difficulty, boardSizeId, timer, againstView,
+//   walls) instead of the hard-coded `LEVELS[1]`. The legacy
+//   `LEVELS` table is no longer imported here.
 //
 // CLIENT COMPONENT
 //   Marked 'use client' because it uses useState (color picker
@@ -29,10 +28,9 @@
 import React from 'react';
 import { useRouter } from 'next/navigation';
 
-import { useProfileStore } from '../../store/profileStore';
+import { useProfileStore, useProfileHydrated } from '../../store/profileStore';
+import { useSettingsStore } from '../../store/settingsStore';
 import { useGameStore } from '../../store/gameStore';
-import { LEVELS } from '../../data/levels';
-import type { Player } from '../../domain/types';
 
 import styles from './MainMenu.module.css';
 
@@ -55,47 +53,56 @@ export function MainMenu() {
   const setName = useProfileStore((s) => s.setName);
   const setColor = useProfileStore((s) => s.setColor);
 
+  // Settings store — drives board size, difficulty, timer, etc.
+  const options = useSettingsStore((s) => s.options);
+
   const startGame = useGameStore((s) => s.startGame);
+
+  // Wait for the persisted profile to rehydrate before painting,
+  // otherwise the user sees DEFAULT_PLAYER1/2 ("Player 1" / blue)
+  // for one frame on every reload before their saved values appear.
+  // SSR + persist middleware always cause that flicker unless we
+  // explicitly gate rendering on `hasHydrated`.
+  const profileHydrated = useProfileHydrated();
 
   /**
    * handleStart
    *
-   * Purpose:      build runtime Player objects from the persisted
-   *               profiles and kick off a new game session.
-   * Inputs:       none (reads profile + game stores)
-   * Outputs:     none
+   * Purpose:      kick off a new game session from the persisted
+   *               profiles + settings.
+   * Inputs:       none (reads profile + settings stores)
+   * Outputs:      none
    * Side effects: mutates the game store and navigates to /play.
    */
   function handleStart() {
-    // Hard-coded current level until Phase B wires settings.
-    // LEVELS[1] === 8x10 "Standard", matching the old default.
-    const level = LEVELS[1] ?? LEVELS[0];
-
-    // Apply the player-chosen accent colors on top of the level.
-    const customLevel = {
-      ...level,
-      player1Color: player1.color,
-      player2Color: player2.color,
-    };
-
-    const p1: Player = {
-      id: 'p1',
-      name: player1.name.trim() || 'Player 1',
-      rating: 1000,
-    };
-    const p2: Player = {
-      id: 'p2',
-      name: player2.name.trim() || 'Player 2',
-      rating: 1000,
-    };
-
-    // againstView default = false; re-introduced as a setting in Phase B.
-    startGame(customLevel, p1, p2, false);
+    startGame({
+      options,
+      profiles: [player1, player2],
+    });
     router.push('/play');
   }
 
+  // Pre-hydration we render the SAME DOM but invisible, so:
+  //   - SSR HTML and the first client paint are byte-identical
+  //     (no React hydration warning),
+  //   - the page reserves the correct space (no layout shift /
+  //     "flicker" when the form pops in),
+  //   - the user never sees DEFAULT_PLAYER1/2 because the form is
+  //     literally invisible until the persisted values are applied.
+  //
+  // We use `visibility: hidden` (not `display: none`) so the layout
+  // is reserved. `aria-hidden` keeps screen readers quiet during the
+  // brief invisible phase.
+  const wrapperStyle: React.CSSProperties | undefined = profileHydrated
+    ? undefined
+    : { visibility: 'hidden' };
+
   return (
-    <div className={styles.menuWrapper}>
+    <div
+      className={styles.menuWrapper}
+      style={wrapperStyle}
+      aria-hidden={!profileHydrated}
+    >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src="/images/logo.png" alt="Mojong" className={styles.logo} />
 

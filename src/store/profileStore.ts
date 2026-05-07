@@ -28,6 +28,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { useEffect, useState } from 'react';
 
 import type { Profile } from '../domain/types';
 import { STORAGE_KEYS } from '../persistence/keys';
@@ -117,3 +118,54 @@ export const useProfileStore = create<ProfileStoreState>()(
     },
   ),
 );
+
+// ── Hydration hook ────────────────────────────────────────────
+//
+// Zustand's `persist` middleware reads localStorage AFTER the first
+// client render, which means components that read the store render
+// once with `DEFAULT_*` and then re-render with the real persisted
+// values — producing a visible "flicker" on reload.
+//
+// `useProfileHydrated()` flips to `true` only once rehydration is
+// complete, so callers can gate their first paint on it and avoid
+// rendering the defaults at all.
+
+/**
+ * Returns true when `useProfileStore` has finished rehydrating
+ * from localStorage. On the server (SSR) and on the very first
+ * client render this is `false`; it becomes `true` synchronously
+ * after `persist` finishes reading storage.
+ *
+ * Inputs:  none.
+ * Outputs: boolean — has rehydration completed?
+ * Side effects: subscribes to one persist event; auto-unsubscribes.
+ */
+export function useProfileHydrated(): boolean {
+  // IMPORTANT: always start `false`, even when
+  // `persist.hasHydrated()` already reports `true`.
+  //
+  // - During SSR, our storage adapter is a no-op so persist treats
+  //   rehydration as "done with no data" and `hasHydrated()` is true,
+  //   meaning the server-rendered HTML would contain DEFAULT values.
+  // - The very first client render must match the SSR HTML to avoid
+  //   hydration mismatches, so it also has to render with defaults.
+  // - Only AFTER the first paint (i.e. inside `useEffect`) is it safe
+  //   to flip to `true` and re-render with the real persisted values.
+  //
+  // The visible result: one paint of the placeholder, then the saved
+  // values appear — never the defaults.
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    if (useProfileStore.persist.hasHydrated()) {
+      setHydrated(true);
+      return;
+    }
+    const unsub = useProfileStore.persist.onFinishHydration(() =>
+      setHydrated(true),
+    );
+    return unsub;
+  }, []);
+
+  return hydrated;
+}

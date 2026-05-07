@@ -1,12 +1,19 @@
 // ============================================================
 // src/data/levels.ts
 //
-// PURPOSE: Seed level definitions.
-// Each level controls board dimensions, which pieces both players
-// receive, and the accent colours shown in the UI.
+// @deprecated (Step 7) — DO NOT add new readers.
 //
-// levelNumber is the sort order shown on the selection screen.
-// player1Color / player2Color are any valid CSS color strings.
+// Since Step 7 the live game-flow is driven by `useSettingsStore`
+// (`GameOptions`) + `useProfileStore` (`Profile`) + the
+// difficulty→roster mapping in `figuretypes.ts`. This module now
+// only survives because the legacy `GameSetup` component (which is
+// no longer imported by the running app) still references `LEVELS`.
+//
+// Phase I will delete `GameSetup` and this file together.
+//
+// PURPOSE (historical)
+//   Seed level definitions: board dimensions, per-player roster,
+//   accent colours, and timer minutes — all bundled into one type.
 // ============================================================
 
 import type { Level } from '../domain/types';

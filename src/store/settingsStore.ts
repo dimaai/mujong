@@ -28,6 +28,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { useEffect, useState } from 'react';
 
 import type { GameOptions } from '../domain/types';
 import { DEFAULT_BOARD_SIZE_ID } from '../data/boardSizes';
@@ -168,3 +169,38 @@ export const useSettingsStore = create<SettingsStoreState>()(
     },
   ),
 );
+
+// ── Hydration hook ────────────────────────────────────────────
+//
+// See the matching comment in `profileStore.ts`. Components that
+// need to render persisted settings without a flicker can gate
+// their first paint on this returning `true`.
+
+/**
+ * Returns true when `useSettingsStore` has finished rehydrating
+ * from localStorage.
+ *
+ * Inputs:  none.
+ * Outputs: boolean — has rehydration completed?
+ * Side effects: subscribes to one persist event; auto-unsubscribes.
+ */
+export function useSettingsHydrated(): boolean {
+  // See the matching comment in `profileStore.ts` for why we always
+  // start `false`: SSR + first client render must agree (both render
+  // the placeholder), and only after the first paint do we flip to
+  // `true` and reveal the real persisted values.
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    if (useSettingsStore.persist.hasHydrated()) {
+      setHydrated(true);
+      return;
+    }
+    const unsub = useSettingsStore.persist.onFinishHydration(() =>
+      setHydrated(true),
+    );
+    return unsub;
+  }, []);
+
+  return hydrated;
+}

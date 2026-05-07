@@ -6,7 +6,7 @@
 // the `figures` array in GameState. These helpers abstract that.
 // ============================================================
 
-import type { Position, PlayerFigureInstance, Level, AllowedFigure } from './types';
+import type { Position, PlayerFigureInstance, AllowedFigure } from './types';
 
 // ── Query helpers ─────────────────────────────────────────────
 
@@ -95,16 +95,25 @@ export function generateInstanceId(): string {
 
 /**
  * Builds the initial set of PlayerFigureInstances for a new game.
- * For each entry in level.allowedFigures, creates `quantity` instances
- * for EACH player, all starting with status "available" and no position.
  *
- * @param level    - the level definition (boardWidth/boardHeight/allowedFigures)
- * @param players  - tuple of [player1, player2]
- * @param skinMap  - maps figureTypeId → skinId so each type gets a default skin
- * @returns        - flat array of all instances for both players
+ * Step 7 note: this used to take a full `Level`, but the per-game
+ * piece roster now comes from the difficulty mapping
+ * (`getFigureRosterFor`) instead of being baked into the level.
+ * Decoupling roster from board dimensions lets Settings drive
+ * each axis independently.
+ *
+ * For each entry in `allowedFigures`, creates `quantity` instances
+ * for EACH player, all starting with status "available" and no
+ * position.
+ *
+ * @param allowedFigures - per-player roster (figure type + quantity)
+ * @param players        - tuple of [player1, player2]
+ * @param skinMap        - maps figureTypeId → skinId so each type
+ *                         gets a default skin
+ * @returns flat array of all instances for both players
  */
 export function createInitialFigures(
-  level: Level,
+  allowedFigures: AllowedFigure[],
   players: [{ id: string }, { id: string }],
   skinMap: Record<string, string>,
 ): PlayerFigureInstance[] {
@@ -112,7 +121,7 @@ export function createInitialFigures(
 
   for (const playerIndex of [0, 1] as const) {
     const player = players[playerIndex];
-    for (const allowed of level.allowedFigures) {
+    for (const allowed of allowedFigures) {
       for (let i = 0; i < allowed.quantity; i++) {
         instances.push({
           instanceId: generateInstanceId(),

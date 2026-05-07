@@ -9,7 +9,7 @@
 // To change movement: edit the `movement` object on that entry.
 // ============================================================
 
-import type { FigureType } from '../domain/types';
+import type { AllowedFigure, Difficulty, FigureType } from '../domain/types';
 
 /**
  * All figure types available in the game.
@@ -67,3 +67,47 @@ export const FIGURE_TYPES: FigureType[] = [
 export const FIGURE_TYPE_MAP: Record<string, FigureType> = Object.fromEntries(
   FIGURE_TYPES.map((ft) => [ft.id, ft]),
 );
+
+// ── Difficulty → roster mapping (Step 7) ──────────────────────
+//
+// Each difficulty maps to a piece roster (`AllowedFigure[]`) that
+// each player receives at the start of a game. Replaces the
+// per-level `Level.allowedFigures` field used by the legacy flow.
+//
+// Rosters are tuned so that:
+//   - beginner  → fewer pieces and the simplest movers, easier to learn.
+//   - normal    → matches the current default the game ships with so
+//                 existing players see no behavioural change.
+//   - advanced  → more pieces and more jumpers, longer/denser games.
+
+const ROSTER_BY_DIFFICULTY: Record<Difficulty, AllowedFigure[]> = {
+  beginner: [
+    { figureTypeId: 'ft_slon', quantity: 2 },
+    { figureTypeId: 'ft_runner', quantity: 1 },
+    { figureTypeId: 'ft_cross', quantity: 1 },
+  ],
+  normal: [
+    { figureTypeId: 'ft_slon', quantity: 2 },
+    { figureTypeId: 'ft_runner', quantity: 2 },
+    { figureTypeId: 'ft_cross', quantity: 1 },
+    { figureTypeId: 'ft_ziraf', quantity: 1 },
+  ],
+  advanced: [
+    { figureTypeId: 'ft_slon', quantity: 2 },
+    { figureTypeId: 'ft_runner', quantity: 2 },
+    { figureTypeId: 'ft_cross', quantity: 2 },
+    { figureTypeId: 'ft_ziraf', quantity: 2 },
+  ],
+};
+
+/**
+ * Returns the per-player figure roster for a given difficulty.
+ *
+ * Inputs:  `difficulty` — one of 'beginner' | 'normal' | 'advanced'.
+ * Outputs: a fresh `AllowedFigure[]` (cloned so callers may mutate
+ *          freely without affecting the canonical mapping).
+ * Side effects: none.
+ */
+export function getFigureRosterFor(difficulty: Difficulty): AllowedFigure[] {
+  return ROSTER_BY_DIFFICULTY[difficulty].map((entry) => ({ ...entry }));
+}

@@ -1,13 +1,12 @@
 // ============================================================
 // src/components/GameSetup/GameSetup.tsx
 //
-// PURPOSE: The entry screen shown before a game starts.
-// Lets players enter their names and pick a level.
-// Once "Start Game" is clicked, it calls startGame() on the store
-// and switches to GameCanvas.
+// @deprecated (Step 5/7) — this component is no longer imported.
+// MainMenu + Settings replace it. Kept compiling so it can be
+// deleted cleanly in Phase I.
 //
-// This is a client component because it manages local form state
-// with useState and reads/writes the Zustand store.
+// PURPOSE (historical): The entry screen shown before a game
+// starts. Lets players enter their names and pick a level.
 // ============================================================
 
 'use client';
@@ -16,7 +15,8 @@ import React, { useState } from 'react';
 import { useGameStore } from '../../store/gameStore';
 import { GameCanvas } from '../GameCanvas/GameCanvas';
 import { LEVELS } from '../../data/levels';
-import type { Player } from '../../domain/types';
+import { BOARD_SIZES, DEFAULT_BOARD_SIZE_ID } from '../../data/boardSizes';
+import type { Difficulty, Profile } from '../../domain/types';
 import styles from './GameSetup.module.css';
 
 /**
@@ -62,19 +62,36 @@ export function GameSetup() {
     const level = LEVELS.find((l) => l.levelId === selectedLevelId);
     if (!level) return;
 
-    // Override level defaults with the user's selections.
-    const customLevel = {
-      ...level,
-      timerMinutes,
-      player1Color: p1Color,
-      player2Color: p2Color,
-    };
+    // Map the legacy level → new GameOptions shape so the
+    // deprecated form still drives `startGame`. Picks the
+    // first board-size preset whose dimensions match, falling
+    // back to the default otherwise.
+    const matched = BOARD_SIZES.find(
+      (b) => b.width === level.boardWidth && b.height === level.boardHeight,
+    );
+    const boardSizeId = matched?.id ?? DEFAULT_BOARD_SIZE_ID;
+    const difficulty: Difficulty =
+      level.levelNumber === 1
+        ? 'beginner'
+        : level.levelNumber >= 3
+          ? 'advanced'
+          : 'normal';
 
-    // Player objects match the Player interface in domain/types.ts.
-    const p1: Player = { id: 'p1', name: p1Name.trim() || 'Player 1', rating: 1000 };
-    const p2: Player = { id: 'p2', name: p2Name.trim() || 'Player 2', rating: 1000 };
+    const profiles: [Profile, Profile] = [
+      { name: p1Name.trim() || 'Player 1', color: p1Color },
+      { name: p2Name.trim() || 'Player 2', color: p2Color },
+    ];
 
-    startGame(customLevel, p1, p2, againstView);
+    startGame({
+      options: {
+        difficulty,
+        boardSizeId,
+        timerMinutes,
+        againstView,
+        walls: false,
+      },
+      profiles,
+    });
   }
 
   // If a game is already running, render the full game view.

@@ -16,13 +16,16 @@ import { create } from 'zustand';
 import type {
   GameState,
   GamePhase,
+  GameOptions,
   Player,
+  Profile,
   Level,
   Position,
   TurnAction,
   PlayerFigureInstance,
 } from '../domain/types';
-import { FIGURE_TYPE_MAP } from '../data/figuretypes';
+import { FIGURE_TYPE_MAP, getFigureRosterFor } from '../data/figuretypes';
+import { BOARD_SIZE_MAP } from '../data/boardSizes';
 import { createInitialFigures, getFigureAt } from '../domain/board';
 import { getValidMoves, getValidPlacements, isWinningMove } from '../domain/rules';
 
@@ -69,12 +72,19 @@ interface GameStore {
 
   // Actions
   /**
-   * Initializes a brand-new game session.
-   * @param level   - the chosen level (board size, allowed figures, colors)
-   * @param player1 - bottom player (moves toward row 0)
-   * @param player2 - top player    (moves toward last row)
+   * Initializes a brand-new game session from the user's persisted
+   * settings + profiles (Step 7).
+   *
+   * @param args.options  - the live `GameOptions` from `useSettingsStore`
+   *                        (difficulty, boardSizeId, timer, againstView, walls)
+   * @param args.profiles - tuple `[player1Profile, player2Profile]` from
+   *                        `useProfileStore` (name + color)
+   *
+   * Side effects: replaces the current `game` with a fresh `GameState`.
+   * Note: `walls` is read but not yet honoured by the rules engine
+   * (lands in Step 8); `timerMinutes` seeds `playerTimers` only.
    */
-  startGame: (level: Level, player1: Player, player2: Player, againstView?: boolean) => void;
+  startGame: (args: { options: GameOptions; profiles: [Profile, Profile] }) => void;
 
   /**
    * Selects a PLACED figure on the board and computes its legal moves.
@@ -135,12 +145,52 @@ export const useGameStore = create<GameStore>((set, get) => ({
   selectedInstanceId: null,
   validMoveTargets: [],
 
-  startGame: (level, player1, player2, againstView) => {
-    // createInitialFigures builds all PlayerFigureInstances for both players.
-    // All start with status "available" and position null.
-    const figures = createInitialFigures(level, [player1, player2], DEFAULT_SKIN_MAP);
+  startGame: ({ options, profiles }) => {
+    // Resolve the named board-size preset to concrete dimensions.
+    // Falls back to 'medium' if a stale id ever lands here so the
+    // game still starts rather than crashing.
+    const sizePreset =
+      BOARD_SIZE_MAP[options.boardSizeId] ?? BOARD_SIZE_MAP.medium;
 
-    const timerSeconds = level.timerMinutes * 60;
+    // Difficulty → per-player piece roster.
+    const allowedFigures = getFigureRosterFor(options.difficulty);
+
+    // Build runtime Player objects from the persisted profiles.
+    // Profiles intentionally don't carry id/rating — those are
+    // session-scoped values supplied here.
+    const player1: Player = {
+      id: 'p1',
+      name: profiles[0].name.trim() || 'Player 1',
+      rating: 1000,
+    };
+    const player2: Player = {
+      id: 'p2',
+      name: profiles[1].name.trim() || 'Player 2',
+      rating: 1000,
+    };
+
+    // Synthesize the legacy `Level` shape so the rules engine,
+    // Board, and GameCanvas can keep reading `game.level.*`
+    // unchanged. Phase I will retire `Level` entirely.
+    const level: Level = {
+      levelId: `synthetic_${options.boardSizeId}_${options.difficulty}`,
+      levelNumber: 0,
+      levelName: 'Custom',
+      boardWidth: sizePreset.width,
+      boardHeight: sizePreset.height,
+      allowedFigures,
+      player1Color: profiles[0].color,
+      player2Color: profiles[1].color,
+      timerMinutes: options.timerMinutes,
+    };
+
+    const figures = createInitialFigures(
+      allowedFigures,
+      [player1, player2],
+      DEFAULT_SKIN_MAP,
+    );
+
+    const timerSeconds = options.timerMinutes * 60;
 
     const newGame: GameState = {
       gameId: `game_${Date.now()}`,
@@ -156,7 +206,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       drawOfferFrom: null,
       drawReason: null,
       playerTimers: [timerSeconds, timerSeconds],
-      againstView: againstView ?? false,
+      againstView: options.againstView,
     };
 
     set({ game: newGame, selectedInstanceId: null, validMoveTargets: [] });
