@@ -28,8 +28,8 @@ import type { BoardSizePreset } from '../domain/types';
  */
 export const BOARD_SIZES: BoardSizePreset[] = [
   { id: 'small',  label: 'S (6 × 7)',   width: 6, height: 7  },
-  { id: 'medium', label: 'M (8 × 9)', width: 8, height: 9 },
-  { id: 'large',  label: 'L (6 × 11)',  width: 6, height: 11 },
+  { id: 'medium', label: 'M (6 × 9)', width: 6, height: 9 },
+  { id: 'large',  label: 'L (7 × 11)',  width: 7, height: 11 },
 ];
 
 /** O(1) lookup: boardSizeId → preset. */

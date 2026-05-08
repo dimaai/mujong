@@ -92,11 +92,6 @@ describe('placeWalls', () => {
     }
   });
 
-  it('is deterministic (same input → same output)', () => {
-    expect(placeWalls(8, 10)).toEqual(placeWalls(8, 10));
-    expect(placeWalls(6, 9)).toEqual(placeWalls(6, 9));
-  });
-
   it('places both walls on the single middle row (rounded down)', () => {
     for (const [w, h] of [
       [6, 9],
@@ -104,45 +99,38 @@ describe('placeWalls', () => {
       [6, 11],
     ] as const) {
       const midRow = Math.floor(h / 2);
-      const walls = placeWalls(w, h);
-      for (const wall of walls) expect(wall.row).toBe(midRow);
-    }
-  });
-
-  it('places walls mirror-symmetrically across the vertical centre line', () => {
-    for (const [w, h] of [
-      [6, 9],
-      [8, 10],
-      [6, 11],
-    ] as const) {
-      const walls = placeWalls(w, h);
-      // Mirror each wall horizontally; the resulting set must equal the original.
-      const key = (p: Position) => `${p.col},${p.row}`;
-      const original = new Set(walls.map(key));
-      const mirrored = new Set(
-        walls.map((p) => key({ col: w - 1 - p.col, row: p.row })),
-      );
-      expect(mirrored).toEqual(original);
+      // Sample multiple times since column choice is randomised.
+      for (let i = 0; i < 20; i++) {
+        const walls = placeWalls(w, h);
+        for (const wall of walls) expect(wall.row).toBe(midRow);
+      }
     }
   });
 
   it('keeps walls inside the board', () => {
     const w = 8;
     const h = 10;
-    for (const wall of placeWalls(w, h)) {
-      expect(wall.col).toBeGreaterThanOrEqual(0);
-      expect(wall.col).toBeLessThan(w);
-      expect(wall.row).toBeGreaterThanOrEqual(0);
-      expect(wall.row).toBeLessThan(h);
+    for (let i = 0; i < 50; i++) {
+      for (const wall of placeWalls(w, h)) {
+        expect(wall.col).toBeGreaterThanOrEqual(0);
+        expect(wall.col).toBeLessThan(w);
+        expect(wall.row).toBeGreaterThanOrEqual(0);
+        expect(wall.row).toBeLessThan(h);
+      }
     }
   });
 
-  it('collapses to a single wall when boardWidth is odd (centre column)', () => {
-    // For odd widths, leftCol === rightCol, so the helper returns just
-    // one wall rather than two overlapping entries.
-    const walls = placeWalls(5, 9);
-    expect(walls).toHaveLength(1);
-    expect(walls[0]).toEqual({ col: 2, row: 4 });
+  it('eventually picks every column across many draws', () => {
+    // Sanity-check the randomness: across enough samples, every
+    // column on the middle row should appear at least once.
+    const w = 6;
+    const h = 9;
+    const seen = new Set<number>();
+    for (let i = 0; i < 500; i++) {
+      for (const wall of placeWalls(w, h)) seen.add(wall.col);
+      if (seen.size === w) break;
+    }
+    expect(seen.size).toBe(w);
   });
 });
 

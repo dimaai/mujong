@@ -149,21 +149,22 @@ export function createInitialFigures(
  *   - `boardHeight` — number of rows    (must be ≥ 2).
  *
  * Output: an array of exactly two `Position`s on the single middle
- *         row, mirror-symmetric across the vertical centre line so
- *         the layout reads identically from either player's side.
+ *         row, on two RANDOMLY chosen distinct columns.
  *
- * Side effects: none. Pure function — same inputs always return the
- *               same positions, so unit tests don't need RNG.
+ * Side effects: reads `Math.random()`. The result is therefore not
+ *               deterministic — call once at game start and store
+ *               the result in `GameState.walls` so the layout is
+ *               stable for the rest of the match (and survives the
+ *               localStorage snapshot, which persists `walls`).
  *
- * Placement rule (per the user-confirmed simplification of Q-002):
- *   - `midRow   = floor(boardHeight / 2)`     — round down for evens
- *   - `leftCol  = floor((boardWidth - 1) / 2)`
- *   - `rightCol = boardWidth - 1 - leftCol`
- *   - Walls = `(leftCol, midRow)` and `(rightCol, midRow)`.
+ * Placement rule:
+ *   - `midRow = floor(boardHeight / 2)` (unchanged from the
+ *     previous implementation).
+ *   - Two distinct columns picked uniformly from `0..boardWidth-1`.
  *
- * For odd `boardWidth` (e.g. 5) `leftCol === rightCol`, so we
- * collapse to a single wall — the helper still returns one entry
- * in that edge case rather than two overlapping walls.
+ * Edge case: if `boardWidth < 2` we return whatever fits (one or
+ * zero walls) rather than spinning forever. Our presets are all
+ * `width >= 6` so this only matters for defensive correctness.
  *
  * Behaviour note (per user direction): pieces may pass *over* a
  * wall during a move (the rules engine doesn't iterate intermediate
@@ -175,13 +176,18 @@ export function placeWalls(
   boardHeight: number,
 ): Position[] {
   const midRow = Math.floor(boardHeight / 2);
-  const leftCol = Math.floor((boardWidth - 1) / 2);
-  const rightCol = boardWidth - 1 - leftCol;
-  if (leftCol === rightCol) {
-    return [{ col: leftCol, row: midRow }];
-  }
+  if (boardWidth <= 0) return [];
+  if (boardWidth === 1) return [{ col: 0, row: midRow }];
+
+  const firstCol = Math.floor(Math.random() * boardWidth);
+  // Pick a second column uniformly from the remaining `boardWidth - 1`
+  // options, then shift past `firstCol` to skip it. Cheaper and
+  // bias-free vs. rejection sampling.
+  let secondCol = Math.floor(Math.random() * (boardWidth - 1));
+  if (secondCol >= firstCol) secondCol += 1;
+
   return [
-    { col: leftCol, row: midRow },
-    { col: rightCol, row: midRow },
+    { col: firstCol, row: midRow },
+    { col: secondCol, row: midRow },
   ];
 }

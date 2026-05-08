@@ -28,6 +28,82 @@ import { FIGURE_TYPE_MAP, getFigureRosterFor } from '../data/figuretypes';
 import { BOARD_SIZE_MAP } from '../data/boardSizes';
 import { createInitialFigures, getFigureAt, placeWalls } from '../domain/board';
 import { getValidMoves, getValidPlacements, isWinningMove } from '../domain/rules';
+import { getEnvelope, removeItem, setEnvelope } from '../persistence/storage';
+import { STORAGE_KEYS } from '../persistence/keys';
+
+// ── In-progress game persistence (Step 10) ────────────────────
+//
+// We persist the live `GameState` to localStorage so a refresh,
+// a tab close, or a relaunch from the iOS home screen can resume
+// the same match. Implementation notes:
+//
+//   - The full `GameState` is the snapshot. It's already a plain
+//     JSON-friendly shape (no functions, no class instances), so
+//     `JSON.stringify`/`parse` round-trip cleanly.
+//   - Writes are debounced via `requestIdleCallback` (falling back
+//     to `setTimeout(0)`) so each move doesn't block the UI on
+//     localStorage I/O. We coalesce: while a flush is pending,
+//     additional changes don't enqueue another one — the flush
+//     reads the *latest* state via `useGameStore.getState()`.
+//   - Schema version: the envelope's `v` is compared to
+//     `SNAPSHOT_VERSION` on read. Any mismatch deletes the entry
+//     (no migration in v1, per the plan).
+
+const SNAPSHOT_VERSION = 1;
+let snapshotPending = false;
+
+function flushSnapshot(): void {
+  snapshotPending = false;
+  const current = useGameStore.getState().game;
+  // Only an actively-playing game is worth resuming. If it ended,
+  // got drawn, or was torn down, drop the entry entirely.
+  if (!current || current.phase !== 'playing') {
+    removeItem(STORAGE_KEYS.gameSnapshot);
+    return;
+  }
+  setEnvelope<GameState>(STORAGE_KEYS.gameSnapshot, current);
+}
+
+function scheduleSnapshot(): void {
+  if (typeof window === 'undefined') return;
+  if (snapshotPending) return;
+  snapshotPending = true;
+  const ric = (
+    window as unknown as {
+      requestIdleCallback?: (cb: () => void) => number;
+    }
+  ).requestIdleCallback;
+  if (typeof ric === 'function') {
+    ric(flushSnapshot);
+  } else {
+    window.setTimeout(flushSnapshot, 0);
+  }
+}
+
+/**
+ * Returns true when a resumable game snapshot exists in localStorage.
+ *
+ * Purpose:      lets MainMenu decide whether to show "Resume game".
+ * Inputs:       none
+ * Outputs:      boolean
+ * Side effects: deletes a stored envelope whose schema version no
+ *               longer matches `SNAPSHOT_VERSION` (defensive cleanup).
+ */
+export function hasGameSnapshot(): boolean {
+  const env = getEnvelope<GameState>(STORAGE_KEYS.gameSnapshot);
+  if (env === null) return false;
+  if (env.v !== SNAPSHOT_VERSION) {
+    removeItem(STORAGE_KEYS.gameSnapshot);
+    return false;
+  }
+  // A snapshot of a finished game shouldn't have been written, but
+  // if one slipped through (e.g. older code), don't offer to resume it.
+  if (env.data?.phase !== 'playing') {
+    removeItem(STORAGE_KEYS.gameSnapshot);
+    return false;
+  }
+  return true;
+}
 
 // ── Position key for threefold-repetition ─────────────────────
 // Encodes whose turn it is + every placed figure's position into a
@@ -136,6 +212,18 @@ interface GameStore {
 
   /** Tears down the current game so the setup screen is shown again. */
   resetGame: () => void;
+
+  /**
+   * Step 10: rehydrate the live game from the localStorage snapshot.
+   * Called by /play on mount when there's no in-memory game (e.g. the
+   * user refreshed mid-match or relaunched the PWA).
+   *
+   * @returns true if a valid snapshot was loaded into the store,
+   *          false otherwise (caller should redirect home).
+   * Side effects: sets `game` (and clears selection) on success;
+   *               deletes a stale/invalid snapshot on failure.
+   */
+  hydrateFromSnapshot: () => boolean;
 }
 
 // ── Store implementation ──────────────────────────────────────
@@ -430,4 +518,41 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   resetGame: () => set({ game: null, selectedInstanceId: null, validMoveTargets: [] }),
+
+  hydrateFromSnapshot: () => {
+    const env = getEnvelope<GameState>(STORAGE_KEYS.gameSnapshot);
+    if (env === null) return false;
+    if (env.v !== SNAPSHOT_VERSION) {
+      removeItem(STORAGE_KEYS.gameSnapshot);
+      return false;
+    }
+    if (!env.data || env.data.phase !== 'playing') {
+      removeItem(STORAGE_KEYS.gameSnapshot);
+      return false;
+    }
+    set({
+      game: env.data,
+      selectedInstanceId: null,
+      validMoveTargets: [],
+    });
+    return true;
+  },
 }));
+
+// ── Auto-snapshot subscription (Step 10) ──────────────────────
+//
+// One module-level subscription writes the snapshot whenever the
+// `game` slice changes. Putting this *outside* every action keeps
+// the actions readable: they don't have to remember to call a
+// snapshot helper, and we have a single chokepoint where the
+// debounce + clear-on-end policy lives. The flush itself reads
+// the latest state via `getState()`, so this works even when many
+// rapid mutations fire in the same tick.
+if (typeof window !== 'undefined') {
+  let lastGame: GameState | null = useGameStore.getState().game;
+  useGameStore.subscribe((state) => {
+    if (state.game === lastGame) return;
+    lastGame = state.game;
+    scheduleSnapshot();
+  });
+}

@@ -25,14 +25,21 @@
 
 'use client';
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { useProfileStore, useProfileHydrated } from '../../store/profileStore';
 import { useSettingsStore } from '../../store/settingsStore';
-import { useGameStore } from '../../store/gameStore';
+import { useGameStore, hasGameSnapshot } from '../../store/gameStore';
 
 import styles from './MainMenu.module.css';
+
+// Module-level guard so auto-resume fires at most once per
+// page-module lifetime. A hard refresh reloads the module and
+// resets the flag — exactly the behaviour we want. Without this,
+// `router.push('/')` from anywhere else (e.g. after Exit Game)
+// could trigger another redirect on the next render.
+let autoResumeAttempted = false;
 
 /**
  * MainMenu — the home screen.
@@ -57,6 +64,21 @@ export function MainMenu() {
   const options = useSettingsStore((s) => s.options);
 
   const startGame = useGameStore((s) => s.startGame);
+  const hydrateFromSnapshot = useGameStore((s) => s.hydrateFromSnapshot);
+
+  // Auto-resume: on first MainMenu mount in this page-module
+  // lifetime, if a valid snapshot exists, hydrate it and jump
+  // straight to /play. The user will only ever see this menu
+  // when there's no game to resume (or after Exit/finish, which
+  // clear the snapshot via the gameStore subscriber).
+  useEffect(() => {
+    if (autoResumeAttempted) return;
+    autoResumeAttempted = true;
+    if (!hasGameSnapshot()) return;
+    if (hydrateFromSnapshot()) {
+      router.replace('/play');
+    }
+  }, [hydrateFromSnapshot, router]);
 
   // Wait for the persisted profile to rehydrate before painting,
   // otherwise the user sees DEFAULT_PLAYER1/2 ("Player 1" / blue)
