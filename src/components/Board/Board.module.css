@@ -77,17 +77,56 @@
  *     are also disabled in case any sibling overlay tries to grab them)
  */
 .cellWall {
-  background-color: rgba(167, 139, 250, 0.85) !important;
-  background-image: repeating-linear-gradient(
-    45deg,
-    rgba(13, 8, 32, 0.35) 0,
-    rgba(13, 8, 32, 0.35) 4px,
-    transparent 4px,
-    transparent 8px
-  );
+  /* Same transparency as regular cells (alpha 0.85) but darker base
+   * tone, so the logo/background still shows through consistently. */
+  background-color: rgba(6, 4, 16, 0.85) !important;
+  /* Light-grey "X" drawn with two crossing pairs of linear gradients.
+   * Each pair has a wider, low-alpha "halo" stripe under a sharp 2px core,
+   * so the cross appears to glow without needing a filter (filters don't
+   * apply to background-image and would also blur the cell border). */
+  background-image:
+    /* Sharp core — top-left → bottom-right */
+    linear-gradient(
+      to bottom right,
+      transparent 0,
+      transparent calc(50% - 2px),
+      rgba(90, 90, 100, 0.95) calc(50% - 2px),
+      rgba(90, 90, 100, 0.95) calc(50% + 2px),
+      transparent calc(50% + 2px),
+      transparent 100%
+    ),
+    /* Sharp core — bottom-left → top-right */
+    linear-gradient(
+      to top right,
+      transparent 0,
+      transparent calc(50% - 2px),
+      rgba(90, 90, 100, 0.95) calc(50% - 2px),
+      rgba(90, 90, 100, 0.95) calc(50% + 2px),
+      transparent calc(50% + 2px),
+      transparent 100%
+    ),
+    /* Halo — top-left → bottom-right (wider, very faint) */
+    linear-gradient(
+      to bottom right,
+      transparent 0,
+      transparent calc(50% - 6px),
+      rgba(80, 80, 95, 0.22) calc(50% - 6px),
+      rgba(80, 80, 95, 0.22) calc(50% + 6px),
+      transparent calc(50% + 6px),
+      transparent 100%
+    ),
+    /* Halo — bottom-left → top-right */
+    linear-gradient(
+      to top right,
+      transparent 0,
+      transparent calc(50% - 6px),
+      rgba(80, 80, 95, 0.22) calc(50% - 6px),
+      rgba(80, 80, 95, 0.22) calc(50% + 6px),
+      transparent calc(50% + 6px),
+      transparent 100%
+    );
   cursor: not-allowed;
   pointer-events: none;
-  box-shadow: inset 0 0 0 2px rgba(13, 8, 32, 0.45);
 }
 
 /* ── Figure tokens ─────────────────────────────────────── */
