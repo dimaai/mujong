@@ -180,13 +180,13 @@ export function MainMenu() {
             Start Game
           </button>
 
-          {/* Disabled stubs — wired up in later phases.
-              `title` doubles as the hover tooltip per the plan. */}
+          {/* Network Game — Step 15 wires this up to the /network
+              lobby. The actual game-over-network handshake lands
+              in the next slice. */}
           <button
             type="button"
             className={styles.secondaryButton}
-            disabled
-            title="Coming soon"
+            onClick={() => router.push('/network')}
           >
             Network Game
           </button>

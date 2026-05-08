@@ -8,6 +8,19 @@ import withPWAInit from '@ducanh2912/next-pwa';
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   output: 'export',
+  // Dev-only: forward `/api/*` to the locally running Azure Functions
+  // host (`func start` listens on :7071). In production the Static Web
+  // App platform routes `/api/*` to the managed Functions for us, so
+  // this rewrite is a no-op there (and `output: 'export'` strips it).
+  async rewrites() {
+    if (process.env.NODE_ENV !== 'development') return [];
+    return [
+      {
+        source: '/api/:path*',
+        destination: 'http://localhost:7071/api/:path*',
+      },
+    ];
+  },
 };
 
 // PWA wrapper — generates a Workbox-based service worker into `public/` at

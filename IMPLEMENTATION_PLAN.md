@@ -150,6 +150,93 @@ Companion to [ARCHITECTURE.md](ARCHITECTURE.md). Work is sliced into small, inde
 
 ---
 
+## Next 5 steps (continue here, after Step 10 lands)
+
+> These steps build the **networking foundation** (ARCHITECTURE §2 + Phases E–G). They deliberately land in the order *pure protocol → transport → signaling backend → backend wiring → UI lobby*, so each step is reviewable on its own and gameplay stays untouched until Phase G proper. No step in this batch sends a real `ACTION` over the wire — that lands in a later slice once the lobby is stable.
+
+### Step 11 — Net protocol types + ring-buffer logger (pure modules)
+1. **Step name:** Define the wire-format and a tiny diagnostic logger, with zero runtime I/O.
+2. **Files involved:**
+   - `src/net/protocol.ts` *(new)*
+   - `src/net/log.ts` *(new)*
+   - `src/net/__tests__/protocol.test.ts` *(new)*
+3. **What will be implemented:**
+   - `protocol.ts` exports a discriminated-union `NetMessage` covering the v1 verbs from ARCHITECTURE §6 (`HELLO`, `ACTION`, `PING`, `PONG`, `BYE`, `RESYNC_REQ`, `RESYNC_RES`) plus shared envelope fields (`seq: number`, `gameId: string`, `senderId: string`, `t: number`).
+   - `nextSeq(state)` helper returns a monotonically increasing sequence number per `gameId`; pure function, state passed in.
+   - `encode(msg): string` / `decode(raw): NetMessage` thin JSON wrappers that throw `NetProtocolError` on malformed input (validated at the boundary, per copilot rules).
+   - `log.ts` exports a ring-buffer logger: `createNetLogger({ capacity = 200 })` returning `{ log(level, tag, data), snapshot(): LogEntry[], clear() }`. No `console` writes, no globals — UI can pull `snapshot()` later for a debug overlay.
+   - **No WebRTC, no React, no DOM access.** Both modules are framework-agnostic so a future React Native build reuses them verbatim.
+4. **STOP condition:** `npm run type-check`, `npm run lint`, and the new `protocol.test.ts` (round-trip encode→decode for each verb + malformed-input rejection) all pass. No UI or store imports the new files yet.
+
+### Step 12 — WebRTC peer wrapper (manual SDP, no signaling yet)
+1. **Step name:** Wrap `RTCPeerConnection` + DataChannel in a typed adapter that we can drive by hand from a temporary debug page before any signaling exists.
+2. **Files involved:**
+   - `src/net/peer.ts` *(new)*
+   - `src/net/__tests__/peer.fake.test.ts` *(new — uses a fake `RTCPeerConnection` shim so the test runs in Node)*
+   - `src/app/_debug/peer/page.tsx` *(new — dev-only manual-SDP harness; gated behind `process.env.NODE_ENV !== 'production'`)*
+3. **What will be implemented:**
+   - `createPeer({ role: 'host' | 'joiner', logger }): Peer` returning `{ createOffer(), acceptOffer(sdp), createAnswer(), acceptAnswer(sdp), addIceCandidate(c), send(msg: NetMessage), on(event, handler), close() }`.
+   - Internally owns one `RTCPeerConnection` and one `RTCDataChannel` (`ordered: true`, `negotiated: false`, label `"mojong"`).
+   - `send` runs `encode` from Step 11; incoming messages run `decode` and emit `'message'`. Connection state changes emit `'state'` (`'new' | 'connecting' | 'open' | 'closed' | 'failed'`).
+   - All ICE candidates are buffered until the remote description is set, to avoid ordering bugs.
+   - Debug page renders two textareas (offer/answer SDP) and a send-message form, so a developer can connect two browser tabs by hand and verify a `HELLO` round-trip.
+   - **No store wiring, no game traffic.** The peer is a pure transport.
+4. **STOP condition:** Two browser tabs at `/_debug/peer`, copy-pasting offer/answer SDP, reach DataChannel state `open` and exchange a `HELLO` message visible in the on-page log. Fake-shim unit test passes in CI.
+
+### Step 13 — Signaling service skeleton (Azure Function, in-memory)
+1. **Step name:** Stand up the smallest possible signaling backend that hands out invitation codes and stores SDP/ICE in memory.
+2. **Files involved:**
+   - `api/host.json` *(new — Azure Functions v4 host config)*
+   - `api/package.json` *(new — `@azure/functions` dep, Node 20)*
+   - `api/src/sessions/store.ts` *(new — `Map<code, Session>`, `createSession()`, `getSession(code)`, `deleteSession(code)`; pure module with injected clock)*
+   - `api/src/functions/createSession.ts` *(new — `POST /api/sessions` → `{ code, hostToken }`)*
+   - `api/src/functions/joinSession.ts` *(new — `POST /api/sessions/{code}/join` → `{ joinerToken }` or `404`)*
+   - `staticwebapp.config.json` *(touch — ensure `/api/*` is not rewritten to `index.html`)*
+3. **What will be implemented:**
+   - 6-character invitation codes from an unambiguous alphabet (no `0/O`, `1/I/L`); `createSession` retries on collision.
+   - `Session = { code, createdAt, hostToken, joinerToken?, hostSdp?, joinerSdp?, hostIce: [], joinerIce: [] }`.
+   - Tokens are opaque random strings used in Step 14 to authorise SDP/ICE writes; no real auth in v1.
+   - Sessions live only in process memory — acceptable because Azure Static Web Apps managed Functions are short-lived and a v1 session completes within a few minutes. Persistence comes with Phase J.
+   - Unit tests for `createSession` (collision retry) and `joinSession` (404 on unknown code, 409 if already joined).
+   - **No SDP/ICE endpoints yet** — that is Step 14.
+4. **STOP condition:** `npm --prefix api run build` succeeds; `func start` locally serves both endpoints; `curl POST /api/sessions` returns a code, `curl POST /api/sessions/{code}/join` returns a joiner token, repeating the join returns 409. CI lints `api/`.
+
+### Step 14 — SDP/ICE relay + TTL cleanup, wired to the Step 12 peer
+1. **Step name:** Finish the signaling protocol and replace the manual-SDP harness with real handshake calls.
+2. **Files involved:**
+   - `api/src/functions/exchangeSdp.ts` *(new — `PUT/GET /api/sessions/{code}/sdp/{role}` guarded by token)*
+   - `api/src/functions/exchangeIce.ts` *(new — `POST/GET /api/sessions/{code}/ice/{role}` append-and-drain)*
+   - `api/src/sessions/cleanup.ts` *(new — sweep sessions older than 10 min on every request; cheap and stateless)*
+   - `src/net/signaling.ts` *(new — typed `fetch` client: `createSession()`, `joinSession(code)`, `putSdp(role, sdp)`, `pollSdp(role)`, `postIce(role, c)`, `pollIce(role)`)*
+   - `src/net/peer.ts` *(touch — add `connectViaSignaling(client, role)` orchestrator that drives the handshake end-to-end)*
+   - `src/app/_debug/peer/page.tsx` *(touch — add a second mode that uses real signaling instead of textareas)*
+3. **What will be implemented:**
+   - SDP write rejected unless the request's bearer token matches `hostToken` or `joinerToken` for that role.
+   - ICE polling uses a simple long-poll with a 5 s timeout (no SignalR/WebSockets in v1 — keeps the Function cold-start trivial).
+   - `signaling.ts` is the **only** module in `src/net/` that does `fetch`; everything else stays transport-agnostic.
+   - `connectViaSignaling` wires Step 12's `Peer` to Step 14's client: host creates session → puts offer → polls answer → drains ICE; joiner mirrors. Both sides emit `'state: open'` when the DataChannel is up.
+   - 10-minute TTL is enforced opportunistically (no timers, no background jobs) — sessions silently 404 once expired.
+4. **STOP condition:** Two browser tabs at `/_debug/peer` (real-signaling mode), one clicks "Host", reads a 6-char code, the other types it and clicks "Join" → DataChannel reaches `open` → manual `HELLO` exchange works exactly as in Step 12, but with **no SDP copy-paste**. Local Function logs show the session being created, joined, and SDP/ICE exchanged. Restarting `func start` (wiping memory) before join produces a clear `404`.
+
+### Step 15 — `/network` route: Create / Join lobby (no game wiring yet)
+1. **Step name:** Replace the disabled "Network Game" stub with a real lobby that uses Steps 11–14 but does **not** start a game yet.
+2. **Files involved:**
+   - `src/app/network/page.tsx` *(new — renders `<NetworkLobby />`)*
+   - `src/components/NetworkLobby/NetworkLobby.tsx` *(new)*
+   - `src/components/NetworkLobby/NetworkLobby.module.css` *(new)*
+   - `src/store/netStore.ts` *(new — Zustand store: `{ status, code, role, peerProfile, error }` + actions `host()`, `join(code)`, `leave()`; owns the `Peer` instance via a non-reactive ref)*
+   - `src/components/MainMenu/MainMenu.tsx` *(touch — un-stub "Network Game" to navigate to `/network`)*
+3. **What will be implemented:**
+   - **Create** flow: button → `netStore.host()` → shows the 6-char code in big type with a "Copy" button and a spinner labelled "Waiting for opponent…".
+   - **Join** flow: code input (uppercased, trimmed, validated against the Step 13 alphabet) → `netStore.join(code)` → spinner labelled "Connecting…".
+   - On DataChannel `'open'`, both sides exchange a single `HELLO` carrying their `Profile` from `useProfileStore`; the lobby then renders both player cards side-by-side and a disabled "Start Game" button with tooltip "Wired in the next step".
+   - Errors (`404 unknown code`, `409 session full`, `failed` ICE) surface as inline messages with a "Try again" button that calls `leave()` and resets the store.
+   - Leaving the route (`useEffect` cleanup) calls `netStore.leave()` so we never leak a `RTCPeerConnection`.
+   - **No `useGameStore.startGame` call yet.** That wiring is the next slice (Phase G-3) and is intentionally out of scope so this PR stays small.
+4. **STOP condition:** Two devices (or two browser profiles) on the deployed app: device A opens `/network` → Create → reads code aloud → device B opens `/network` → Join → enters code → both screens show both player cards within ~2 s. Closing either tab releases the peer (verified via Function logs going quiet). `npm run type-check`, `npm run lint`, and all tests green.
+
+---
+
 ## Subsequent phases (for context only — not the next 5 steps)
 
 These are listed so reviewers see the shape of the work. They are **not** approved yet and will be sliced into their own small steps when their turn comes. Order is suggested, not contractual.
