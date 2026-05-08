@@ -28,6 +28,13 @@ interface BoardProps {
   level: Level;
   /** All figure instances in the game (placed and unplaced). */
   figures: PlayerFigureInstance[];
+  /**
+   * Wall positions (Step 9). Empty when `options.walls` is false.
+   * Wall cells render as a distinct, non-interactive variant and
+   * are skipped by valid-move/placement highlights (the rules
+   * engine already excludes them upstream — the UI just trusts it).
+   */
+  walls?: Position[];
   /** Maps each playerId to its CSS color string — used to color tokens by owner. */
   playerColors: Record<string, string>;
   /** Side length of each cell in pixels — computed by GameCanvas via ResizeObserver. */
@@ -54,6 +61,7 @@ interface BoardProps {
 export function Board({
   level,
   figures,
+  walls = [],
   playerColors,
   cellSize = 64,
   selectedInstanceId,
@@ -72,6 +80,9 @@ export function Board({
       .map((p) => `${p.col},${p.row}`),
   );
 
+  // O(1) lookup of wall cells, same encoding as `targetSet`.
+  const wallSet = new Set(walls.map((p) => `${p.col},${p.row}`));
+
   const cells: React.ReactNode[] = [];
 
   // Build cells row by row, column by column (top-left to bottom-right).
@@ -81,9 +92,29 @@ export function Board({
       const figure = getFigureAt(col, row, figures);
       const isHighlighted = targetSet.has(posKey);
       const isSelected = figure !== null && figure.instanceId === selectedInstanceId;
+      const isWall = wallSet.has(posKey);
 
       // Checkerboard pattern: light when (row + col) is even.
       const isLight = (row + col) % 2 === 0;
+
+      // Wall cells render as a distinct, non-interactive variant.
+      // No click handler, no figure (walls and figures can't share a
+      // cell since the rules engine forbids landing on walls).
+      if (isWall) {
+        cells.push(
+          <div
+            key={posKey}
+            className={[
+              styles.cell,
+              isLight ? styles.cellLight : styles.cellDark,
+              styles.cellWall,
+            ].join(' ')}
+            role="presentation"
+            aria-label="Wall"
+          />,
+        );
+        continue;
+      }
 
       cells.push(
         <div

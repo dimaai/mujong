@@ -87,6 +87,19 @@ function buildPositionMap(
   return map;
 }
 
+/**
+ * Builds an O(1)-lookup `Set` of `"col,row"` strings for every wall.
+ * Tiny helper, but extracting it keeps `getValidMoves` readable and
+ * means a one-line change if we ever switch to a different encoding.
+ *
+ * @param walls - wall positions from `GameState.walls`
+ */
+function buildWallSet(walls: Position[]): Set<string> {
+  const set = new Set<string>();
+  for (const w of walls) set.add(`${w.col},${w.row}`);
+  return set;
+}
+
 // ── Movement validation ───────────────────────────────────────
 
 /**
@@ -115,12 +128,14 @@ export function getValidMoves(
   playerIndex: 0 | 1,
   allFigures: PlayerFigureInstance[],
   level: Level,
+  walls: Position[] = [],
 ): Position[] {
   if (instance.status !== 'placed' || instance.position === null) return [];
 
   const { col, row } = instance.position;
   const { movement, canJump } = figureType;
   const posMap = buildPositionMap(allFigures);
+  const wallSet = buildWallSet(walls);
   const valid: Position[] = [];
 
   /**
@@ -144,6 +159,17 @@ export function getValidMoves(
     if (!isWithinHorizontalBounds(candidate, level)) return false;
     // Reject squares outside top/bottom (non-winning).
     if (!isOnBoard(candidate, level)) return false;
+
+    // ── Walls (Step 8) ──
+    // Walls are terrain: a piece may NEVER LAND on a wall, regardless
+    // of `canJump`. Note that the rules engine does not iterate
+    // intermediate squares along a ray, so passing OVER a wall on
+    // the way to a square beyond it is not blocked here — that is
+    // intentional and consistent with how the engine treats pieces
+    // along a ray today.
+    if (wallSet.has(`${toCol},${toRow}`)) {
+      return false;
+    }
 
     const occupant = posMap.get(`${toCol},${toRow}`);
 
@@ -200,13 +226,16 @@ export function getValidPlacements(
   playerIndex: 0 | 1,
   allFigures: PlayerFigureInstance[],
   level: Level,
+  walls: Position[] = [],
 ): Position[] {
   const targetRow = playerIndex === 0 ? level.boardHeight - 1 : 0;
   const posMap = buildPositionMap(allFigures);
+  const wallSet = buildWallSet(walls);
   const positions: Position[] = [];
 
   for (let col = 0; col < level.boardWidth; col++) {
-    if (!posMap.has(`${col},${targetRow}`)) {
+    const key = `${col},${targetRow}`;
+    if (!posMap.has(key) && !wallSet.has(key)) {
       positions.push({ col, row: targetRow });
     }
   }

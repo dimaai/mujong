@@ -137,3 +137,51 @@ export function createInitialFigures(
 
   return instances;
 }
+
+// ── Walls (Step 8) ────────────────────────────────────────────
+
+/**
+ * Returns the deterministic positions of the two terrain walls for a
+ * board of the given dimensions.
+ *
+ * Inputs:
+ *   - `boardWidth`  — number of columns (must be ≥ 2).
+ *   - `boardHeight` — number of rows    (must be ≥ 2).
+ *
+ * Output: an array of exactly two `Position`s on the single middle
+ *         row, mirror-symmetric across the vertical centre line so
+ *         the layout reads identically from either player's side.
+ *
+ * Side effects: none. Pure function — same inputs always return the
+ *               same positions, so unit tests don't need RNG.
+ *
+ * Placement rule (per the user-confirmed simplification of Q-002):
+ *   - `midRow   = floor(boardHeight / 2)`     — round down for evens
+ *   - `leftCol  = floor((boardWidth - 1) / 2)`
+ *   - `rightCol = boardWidth - 1 - leftCol`
+ *   - Walls = `(leftCol, midRow)` and `(rightCol, midRow)`.
+ *
+ * For odd `boardWidth` (e.g. 5) `leftCol === rightCol`, so we
+ * collapse to a single wall — the helper still returns one entry
+ * in that edge case rather than two overlapping walls.
+ *
+ * Behaviour note (per user direction): pieces may pass *over* a
+ * wall during a move (the rules engine doesn't iterate intermediate
+ * squares — see `getValidMoves` in `rules.ts`). Walls only block a
+ * piece from *landing* on the wall cell itself. This is intentional.
+ */
+export function placeWalls(
+  boardWidth: number,
+  boardHeight: number,
+): Position[] {
+  const midRow = Math.floor(boardHeight / 2);
+  const leftCol = Math.floor((boardWidth - 1) / 2);
+  const rightCol = boardWidth - 1 - leftCol;
+  if (leftCol === rightCol) {
+    return [{ col: leftCol, row: midRow }];
+  }
+  return [
+    { col: leftCol, row: midRow },
+    { col: rightCol, row: midRow },
+  ];
+}

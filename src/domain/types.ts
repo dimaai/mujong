@@ -210,6 +210,14 @@ export interface GameState {
    * so two players can sit across from each other on one screen.
    */
   againstView: boolean;
+  /**
+   * Wall cells on the board (Step 8). Empty when `options.walls` is
+   * false. Walls are deterministic terrain — never enter, never
+   * capturable. Per the current Q-walls branch (see ARCHITECTURE
+   * §4.2 + IMPLEMENTATION_PLAN Step 8), `canJump` figures may pass
+   * over walls; non-jumpers are blocked.
+   */
+  walls: Position[];
 }
 
 // ── Settings (Step 3) ─────────────────────────────────────────

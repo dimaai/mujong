@@ -131,7 +131,7 @@ export function GameCanvas() {
     return <div className={styles.empty}>No game in progress.</div>;
   }
 
-  const { level, players, currentPlayerIndex, figures, phase, winnerId, drawOfferFrom, playerTimers, againstView } = game;
+  const { level, players, currentPlayerIndex, figures, walls, phase, winnerId, drawOfferFrom, playerTimers, againstView } = game;
   const currentPlayer = players[currentPlayerIndex];
   const hasTimer = level.timerMinutes > 0;
   // ────────────────────────────────────────────────────────────
@@ -295,6 +295,7 @@ export function GameCanvas() {
             <Board
               level={level}
               figures={figures}
+              walls={walls}
               playerColors={PlayerColors}
               cellSize={cellSize}
               selectedInstanceId={selectedInstanceId}

@@ -26,7 +26,7 @@ import type {
 } from '../domain/types';
 import { FIGURE_TYPE_MAP, getFigureRosterFor } from '../data/figuretypes';
 import { BOARD_SIZE_MAP } from '../data/boardSizes';
-import { createInitialFigures, getFigureAt } from '../domain/board';
+import { createInitialFigures, getFigureAt, placeWalls } from '../domain/board';
 import { getValidMoves, getValidPlacements, isWinningMove } from '../domain/rules';
 
 // ── Position key for threefold-repetition ─────────────────────
@@ -190,6 +190,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
       DEFAULT_SKIN_MAP,
     );
 
+    // Step 8: walls are deterministic terrain. Empty array when the
+    // option is off so the rules engine simply has nothing to skip.
+    const walls = options.walls
+      ? placeWalls(sizePreset.width, sizePreset.height)
+      : [];
+
     const timerSeconds = options.timerMinutes * 60;
 
     const newGame: GameState = {
@@ -207,6 +213,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       drawReason: null,
       playerTimers: [timerSeconds, timerSeconds],
       againstView: options.againstView,
+      walls,
     };
 
     set({ game: newGame, selectedInstanceId: null, validMoveTargets: [] });
@@ -233,6 +240,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       game.currentPlayerIndex,
       game.figures,
       game.level,
+      game.walls,
     );
 
     set({ selectedInstanceId: instanceId, validMoveTargets: moves });
@@ -248,11 +256,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const currentPlayer = game.players[game.currentPlayerIndex];
     if (instance.playerId !== currentPlayer.id) return;
 
-    // getValidPlacements returns unoccupied squares on the player's starting row.
+    // getValidPlacements returns unoccupied, non-wall squares on the
+    // player's starting row (Step 8 added the walls argument).
     const placements = getValidPlacements(
       game.currentPlayerIndex,
       game.figures,
       game.level,
+      game.walls,
     );
 
     set({ selectedInstanceId: instanceId, validMoveTargets: placements });
