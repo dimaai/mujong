@@ -37,6 +37,7 @@ import {
   type TableEntity,
   type TableEntityResult,
 } from '@azure/data-tables';
+import { type TokenCredential } from '@azure/identity';
 
 import {
   MAX_ICE_QUEUE,
@@ -113,24 +114,50 @@ function isStatus(err: unknown, status: number): boolean {
 }
 
 /**
+ * Two ways to authenticate against the Table service:
+ *   - `connectionString`: shared-key path. Used by Azurite locally
+ *     and by deployments where the storage account allows key
+ *     access.
+ *   - `endpoint` + `credential`: AAD path (e.g. SWA Functions'
+ *     system-assigned managed identity with the
+ *     "Storage Table Data Contributor" role). Required when the
+ *     storage account has "Allow storage account key access"
+ *     disabled by org policy.
+ */
+export type TableAuth =
+  | { kind: 'connectionString'; connectionString: string }
+  | { kind: 'aad'; endpoint: string; credential: TokenCredential };
+
+/**
  * Lazily ensure the Table exists. Called once on the first
  * operation per process; cached afterwards. Cheap when the table
  * is already there — the create is a single PUT and Azure
  * returns 409 for an existing table, which we ignore.
  */
-async function ensureTable(connectionString: string): Promise<TableClient> {
-  const service = TableServiceClient.fromConnectionString(connectionString, {
-    allowInsecureConnection: connectionString.includes('UseDevelopmentStorage'),
-  });
+async function ensureTable(auth: TableAuth): Promise<TableClient> {
+  const allowInsecure =
+    auth.kind === 'connectionString' &&
+    auth.connectionString.includes('UseDevelopmentStorage');
+
+  const service =
+    auth.kind === 'connectionString'
+      ? TableServiceClient.fromConnectionString(auth.connectionString, {
+          allowInsecureConnection: allowInsecure,
+        })
+      : new TableServiceClient(auth.endpoint, auth.credential);
+
   try {
     await service.createTable(TABLE_NAME);
   } catch (err) {
     // 409 = "TableAlreadyExists" — fine.
     if (!isStatus(err, 409)) throw err;
   }
-  return TableClient.fromConnectionString(connectionString, TABLE_NAME, {
-    allowInsecureConnection: connectionString.includes('UseDevelopmentStorage'),
-  });
+
+  return auth.kind === 'connectionString'
+    ? TableClient.fromConnectionString(auth.connectionString, TABLE_NAME, {
+        allowInsecureConnection: allowInsecure,
+      })
+    : new TableClient(auth.endpoint, TABLE_NAME, auth.credential);
 }
 
 /**
@@ -139,12 +166,12 @@ async function ensureTable(connectionString: string): Promise<TableClient> {
  * uses, so production and tests share the same wiring shape.
  */
 export function createTableStore(
-  deps: StoreDeps & { connectionString: string },
+  deps: StoreDeps & { auth: TableAuth },
 ): SessionStore {
   const maxAttempts = deps.maxAttempts ?? 8;
   let clientP: Promise<TableClient> | null = null;
   const client = (): Promise<TableClient> => {
-    if (!clientP) clientP = ensureTable(deps.connectionString);
+    if (!clientP) clientP = ensureTable(deps.auth);
     return clientP;
   };
 

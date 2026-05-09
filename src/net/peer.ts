@@ -472,6 +472,12 @@ export async function connectViaSignaling(
       reject(new Error(`peer entered terminal state: ${peer.state}`));
     }
   });
+  // Defensive: if the surrounding `try` block throws before we
+  // reach `await stateGate`, the gate may resolve/reject with no
+  // observer. Attaching a no-op catch keeps it from surfacing as
+  // an unhandled rejection in Next.js's dev overlay; the real
+  // `await stateGate` below still sees the eventual outcome.
+  stateGate.catch(() => {});
 
   try {
     if (role === 'host') {

@@ -20,6 +20,7 @@
 // ============================================================
 
 import { randomBytes } from 'node:crypto';
+import { DefaultAzureCredential } from '@azure/identity';
 import { createStore, type SessionStore } from './store.js';
 import { createTableStore } from './tableStore.js';
 
@@ -59,22 +60,42 @@ export function defaultRandomToken(): string {
 }
 
 function pickStore(): SessionStore {
-  const conn =
-    process.env.MOJONG_TABLES_CONN ?? process.env.AzureWebJobsStorage;
-  if (conn && conn.trim().length > 0) {
-    // Use stdout via console.log — the Functions runtime captures
-    // it into Application Insights. We keep this side-effecty log
-    // out of `tableStore.ts` so the implementation file stays
-    // log-free and easier to test.
-    console.log('[mojong] sessions: using Azure Table Storage');
+  // AAD path: preferred for production where the storage account
+  // has key access disabled by org policy. Set
+  // `MOJONG_TABLES_ENDPOINT=https://<account>.table.core.windows.net`
+  // and grant the Function's managed identity the
+  // "Storage Table Data Contributor" role.
+  const endpoint = process.env.MOJONG_TABLES_ENDPOINT?.trim();
+  if (endpoint) {
+    console.log('[mojong] sessions: using Azure Table Storage (AAD)');
     return createTableStore({
       now: () => Date.now(),
       randomCode: defaultRandomCode,
       randomToken: defaultRandomToken,
-      connectionString: conn,
+      auth: {
+        kind: 'aad',
+        endpoint,
+        credential: new DefaultAzureCredential(),
+      },
     });
   }
-  console.log('[mojong] sessions: using in-memory store (no AzureWebJobsStorage)');
+
+  // Connection-string path: Azurite locally, or accounts that
+  // still allow shared-key auth.
+  const conn = (
+    process.env.MOJONG_TABLES_CONN ?? process.env.AzureWebJobsStorage
+  )?.trim();
+  if (conn) {
+    console.log('[mojong] sessions: using Azure Table Storage (connection string)');
+    return createTableStore({
+      now: () => Date.now(),
+      randomCode: defaultRandomCode,
+      randomToken: defaultRandomToken,
+      auth: { kind: 'connectionString', connectionString: conn },
+    });
+  }
+
+  console.log('[mojong] sessions: using in-memory store (no storage configured)');
   return createStore({
     now: () => Date.now(),
     randomCode: defaultRandomCode,

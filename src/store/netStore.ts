@@ -171,6 +171,13 @@ export const useNetStore = create<NetState>((set, get) => {
         }
       });
     });
+    // Ensure the rejection path is always observed. If the awaiter
+    // below never reaches `await helloPromise` (because
+    // `connectViaSignaling` failed first, or the user clicked
+    // Cancel which triggered teardown), the rejection would surface
+    // as an "unhandled promise rejection" in Next.js's dev overlay.
+    // The real awaiter still gets the resolved value or the error.
+    helloPromise.catch(() => {});
 
     // When the channel opens, send our HELLO. We do it via the
     // 'state' subscription rather than awaiting `connectViaSignaling`
