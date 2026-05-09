@@ -49,6 +49,8 @@ function parseRole(raw: string | undefined): Role | null {
 }
 
 function bearerToken(req: HttpRequest): string | null {
+  const custom = req.headers.get('x-mojong-token');
+  if (custom && custom.trim()) return custom.trim();
   const h = req.headers.get('authorization');
   if (!h) return null;
   const m = /^Bearer\s+(.+)$/i.exec(h.trim());

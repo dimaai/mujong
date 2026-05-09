@@ -127,7 +127,11 @@ export function createSignalingClient(
 
   const authHeader = (): Record<string, string> => {
     if (!token) throw new Error('signaling: not authenticated yet');
-    return { Authorization: `Bearer ${token}` };
+    // We use a custom header instead of `Authorization` because Azure
+    // Static Web Apps reserves `Authorization` for its own managed-auth
+    // proxy and strips/replaces it before requests reach the Function.
+    // The server reads the same `X-Mojong-Token` header.
+    return { 'X-Mojong-Token': token };
   };
 
   /** Throw `SignalingError` on non-2xx; otherwise return the response. */

@@ -45,6 +45,12 @@ function parseRole(raw: string | undefined): Role | null {
 }
 
 function bearerToken(req: HttpRequest): string | null {
+  // Primary header: a custom one, because Azure Static Web Apps
+  // reserves `Authorization` for its own managed-auth layer.
+  const custom = req.headers.get('x-mojong-token');
+  if (custom && custom.trim()) return custom.trim();
+  // Backwards-compat: also accept `Authorization: Bearer <t>` for
+  // local `func start` development and for any older client builds.
   const h = req.headers.get('authorization');
   if (!h) return null;
   const m = /^Bearer\s+(.+)$/i.exec(h.trim());
