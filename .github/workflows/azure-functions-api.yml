@@ -1,0 +1,91 @@
+# =============================================================
+# Deploy api/ to a standalone Azure Function App.
+#
+# Why a separate workflow:
+#   The SWA-managed Functions runtime does not expose managed
+#   identity to user code (IDENTITY_ENDPOINT is not injected).
+#   Combined with our storage account's "Allow key access =
+#   Disabled" policy, that left the SWA-hosted API unable to
+#   reach Table Storage. Hosting the API on a real Function App
+#   restores managed identity and unblocks AAD auth.
+#
+# Required GitHub secrets (Settings → Secrets and variables →
+# Actions):
+#   AZURE_FUNCTIONAPP_NAME            Name of the Function App,
+#                                     e.g. mojong-signaling-api
+#   AZURE_FUNCTIONAPP_PUBLISH_PROFILE Publish profile XML
+#                                     downloaded from the
+#                                     Function App's Overview
+#                                     page → "Get publish
+#                                     profile".
+#
+# Required Function App configuration (one-time, in the portal):
+#   - Runtime stack: Node 20 (Linux Consumption recommended)
+#   - System-assigned identity: On
+#   - Role assignment: identity granted "Storage Table Data
+#     Contributor" on the storage account
+#   - App settings:
+#         MOJONG_TABLES_ENDPOINT = https://<account>.table.core.windows.net
+#         FUNCTIONS_WORKER_RUNTIME = node
+#         WEBSITE_NODE_DEFAULT_VERSION = ~20
+#         AzureWebJobsStorage =                  (let SWA inject;
+#                                                 or use AAD by
+#                                                 setting
+#                                                 AzureWebJobsStorage__accountName
+#                                                 + role
+#                                                 assignment)
+#
+# After the first successful deploy, link this Function App as
+# the SWA backend (one-time):
+#   Static Web App → APIs → Link → "Function App" → pick this
+#   one. SWA Standard then proxies /api/* to it transparently;
+#   the PWA needs no client change.
+# =============================================================
+
+name: Deploy API to Azure Functions
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'api/**'
+      - '.github/workflows/azure-functions-api.yml'
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build TypeScript
+        run: npm run build
+
+      - name: Run unit tests
+        run: npm test
+
+      # The Functions runtime needs production deps installed
+      # alongside compiled JS. We deploy the entire api/ folder
+      # (dist/, node_modules/, host.json, package.json).
+      - name: Prune to production dependencies
+        run: npm prune --production
+
+      - name: Deploy to Azure Functions
+        uses: Azure/functions-action@v1
+        with:
+          app-name: ${{ secrets.AZURE_FUNCTIONAPP_NAME }}
+          package: api
+          publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}

@@ -20,7 +20,7 @@
 // ============================================================
 
 import { randomBytes } from 'node:crypto';
-import { createAppServiceManagedIdentityCredential } from './appServiceCredential.js';
+import { ManagedIdentityCredential } from '@azure/identity';
 import { createStore, type SessionStore } from './store.js';
 import { createTableStore } from './tableStore.js';
 
@@ -75,7 +75,7 @@ function pickStore(): SessionStore {
       auth: {
         kind: 'aad',
         endpoint,
-        credential: createAppServiceManagedIdentityCredential(),
+        credential: new ManagedIdentityCredential(),
       },
     });
   }
