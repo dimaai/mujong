@@ -37,7 +37,7 @@ import {
   type TableEntity,
   type TableEntityResult,
 } from '@azure/data-tables';
-import { type TokenCredential } from '@azure/identity';
+import { type TokenCredential } from '@azure/core-auth';
 
 import {
   MAX_ICE_QUEUE,
