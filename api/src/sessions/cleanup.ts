@@ -32,10 +32,10 @@ export const DEFAULT_TTL_MS = 10 * 60 * 1000;
  *   Output : number of sessions pruned
  *   Side fx: deletes entries from the underlying map
  */
-export function pruneExpired(
+export async function pruneExpired(
   store: SessionStore,
   now: number,
   ttlMs: number = DEFAULT_TTL_MS,
-): number {
+): Promise<number> {
   return store.prune(now - ttlMs);
 }

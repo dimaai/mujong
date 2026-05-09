@@ -74,7 +74,7 @@ export async function exchangeSdpHandler(
   req: HttpRequest,
   ctx: InvocationContext,
 ): Promise<HttpResponseInit> {
-  pruneExpired(defaultStore, Date.now());
+  await pruneExpired(defaultStore, Date.now());
 
   const code = (req.params.code ?? '').toUpperCase();
   const role = parseRole(req.params.role);
@@ -83,7 +83,7 @@ export async function exchangeSdpHandler(
   const token = bearerToken(req);
   if (!token) return { status: 401, jsonBody: { error: 'no_token' } };
 
-  const session = defaultStore.getSession(code);
+  const session = await defaultStore.getSession(code);
   if (!session) return { status: 404, jsonBody: { error: 'not_found' } };
 
   if (req.method === 'PUT') {
@@ -100,10 +100,8 @@ export async function exchangeSdpHandler(
     if (typeof sdp !== 'string' || sdp.length === 0) {
       return { status: 400, jsonBody: { error: 'bad_sdp' } };
     }
-    defaultStore.updateSession(code, (s) => {
-      if (role === 'host') s.hostSdp = sdp;
-      else s.joinerSdp = sdp;
-    });
+    const ok = await defaultStore.setSdp(code, role, sdp);
+    if (!ok) return { status: 404, jsonBody: { error: 'not_found' } };
     ctx.log(`sdp put: code=${code} role=${role} bytes=${sdp.length}`);
     return { status: 200, jsonBody: { ok: true } };
   }
@@ -117,7 +115,7 @@ export async function exchangeSdpHandler(
       // Re-read each iteration in case another call wrote into
       // the slot. Also re-check existence so an opportunistic
       // prune that fired during the wait surfaces as 404.
-      const fresh = defaultStore.getSession(code);
+      const fresh = await defaultStore.getSession(code);
       if (!fresh) return { status: 404, jsonBody: { error: 'not_found' } };
       const slot = role === 'host' ? fresh.hostSdp : fresh.joinerSdp;
       if (slot) return { status: 200, jsonBody: { sdp: slot } };

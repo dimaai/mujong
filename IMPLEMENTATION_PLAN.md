@@ -241,6 +241,28 @@ Companion to [ARCHITECTURE.md](ARCHITECTURE.md). Work is sliced into small, inde
 
 > Step 15 leaves us with a working lobby that exchanges `HELLO` profiles but does not start a game. Steps 16–20 carry the connection through to a fully playable, fault-tolerant networked match. The slicing keeps gameplay code untouched until Step 17, and keeps fault-handling separate from the happy path so each PR is independently reviewable.
 
+> **Hotfix prerequisite (insert before Step 16): Step 15.5 — Persist signaling sessions in Azure Table Storage.** Step 13 stored sessions in process memory. On Azure Static Web Apps managed Functions this is fatal: the host scales to multiple workers and idles out after ~30 s, so a `POST /api/sessions` from device A and the matching `POST /api/sessions/{code}/join` from device B usually land on different workers (or after a cold start) and the second one returns `not_found`. Locally with `func start` everything is one process so the bug is invisible — that's why Step 13's tests passed but production lobbies drop after ~30 s. This step is independent from heartbeat (Step 18), which lives entirely on the open DataChannel and never touches the backend.
+
+### Step 15.5 — Persist signaling sessions in Azure Table Storage
+1. **Step name:** Replace the in-memory `defaultStore` with an Azure Table Storage-backed implementation, keeping the `SessionStore` interface and the in-memory store for tests / offline dev.
+2. **Files involved:**
+   - `api/package.json` *(touch — add `@azure/data-tables` dep)*
+   - `api/src/sessions/tableStore.ts` *(new — implements `SessionStore` against `@azure/data-tables`; uses `AzureWebJobsStorage` connection string)*
+   - [api/src/sessions/defaultStore.ts](api/src/sessions/defaultStore.ts) *(touch — choose `tableStore` when `AzureWebJobsStorage` is set, otherwise fall back to the existing in-memory store; same singleton export)*
+   - [api/src/sessions/cleanup.ts](api/src/sessions/cleanup.ts) *(touch — `pruneExpired` becomes `async` so the table-backed store can issue a bounded query; in-memory store stays synchronous internally and just resolves immediately)*
+   - [api/src/sessions/store.ts](api/src/sessions/store.ts) *(touch — make `SessionStore` methods return `Promise<…>`; trivial change since handlers already `await` everything anyway)*
+   - [api/src/functions/createSession.ts](api/src/functions/createSession.ts), [api/src/functions/joinSession.ts](api/src/functions/joinSession.ts), [api/src/functions/exchangeSdp.ts](api/src/functions/exchangeSdp.ts), [api/src/functions/exchangeIce.ts](api/src/functions/exchangeIce.ts) *(touch — `await` the now-async store calls)*
+   - `api/src/sessions/__tests__/tableStore.test.ts` *(new — unit tests using a fake `TableClient` to cover create/get/update/delete and code-collision retry)*
+3. **What will be implemented:**
+   - One Table called `mojongSessions`, partition key = single shard `'s'`, row key = the 6-char code. Entity columns map 1:1 to the existing `Session` shape (`createdAt`, `hostToken`, `joinerToken?`, `hostSdp?`, `joinerSdp?`, `hostIce` / `joinerIce` stored as JSON strings to keep schema flat).
+   - `tableStore.createSession()` uses `createEntity` with `If-None-Match: *` so collisions return `409` and the existing retry loop in `defaultStore.createSession` keeps working.
+   - `pruneExpired` issues `queryEntities({ filter: createdAt lt cutoff })` and deletes in a small batch — opportunistic, called from each handler exactly as today.
+   - **Local dev:** `func start` reads `AzureWebJobsStorage` from `local.settings.json`. We support `UseDevelopmentStorage=true` (Azurite) and a clear "missing → in-memory" fallback so offline dev keeps working without Azurite installed. CI tests use the in-memory store.
+   - **Deployed:** SWA managed Functions already inject a real `AzureWebJobsStorage` connection string, so no extra Azure config is needed beyond creating the storage account and granting the Function its existing managed identity (or just using the connection string).
+4. **STOP condition:** Two devices on the deployed app: device A creates a code on a phone PWA, waits 60 s (well past the cold-start window), device B joins from a different network → `joinSession` succeeds and the lobby connects. Restarting `func start` locally with `AzureWebJobsStorage=UseDevelopmentStorage=true` preserves sessions across restarts; with the env var unset, the existing in-memory behaviour is unchanged. `npm --prefix api run build`, `npm --prefix api test`, and `npm run type-check` all pass.
+
+---
+
 ### Step 16 — Host-authoritative game start over the wire
 1. **Step name:** Lobby's "Start Game" actually starts a synchronised game on both peers.
 2. **Files involved:**

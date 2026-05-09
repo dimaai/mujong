@@ -65,9 +65,18 @@ npm test
 
 ## Notes
 
-- Sessions are kept **in process memory only**. Acceptable for v1 because a
-  game session completes within a few minutes and managed Functions instances
-  are short-lived. Persistence (Azure Table Storage) lands with Phase J.
+- The session store has two implementations behind the same `SessionStore`
+  interface:
+  - **In-memory** (default for `func start` and unit tests). Sessions are lost
+    when the process restarts.
+  - **Azure Table Storage** (used in deployment). Picked automatically when
+    `AzureWebJobsStorage` (or `MOJONG_TABLES_CONN`) is set, so signaling
+    sessions survive cold starts and worker scale-out — required because SWA
+    managed Functions can route a single lobby's host and joiner calls to
+    different worker instances.
+  - Local dev with the table store: install Azurite (`npm i -g azurite`), set
+    `"AzureWebJobsStorage": "UseDevelopmentStorage=true"` in
+    `local.settings.json`, then `func start`.
 - Codes are 6 characters from a 31-char ambiguity-free alphabet
   (`23456789ABCDEFGHJKMNPQRSTUVWXYZ`); `createSession` retries on collision.
 - Tokens are 48-char hex strings (`crypto.randomBytes(24)`). They're opaque

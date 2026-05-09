@@ -40,7 +40,6 @@ import type { Session } from '../sessions/store.js';
 
 const POLL_TIMEOUT_MS = 5_000;
 const POLL_INTERVAL_MS = 100;
-const MAX_QUEUE = 256; // sanity cap — real handshakes use <50
 
 type Role = 'host' | 'joiner';
 
@@ -72,7 +71,7 @@ export async function exchangeIceHandler(
   req: HttpRequest,
   ctx: InvocationContext,
 ): Promise<HttpResponseInit> {
-  pruneExpired(defaultStore, Date.now());
+  await pruneExpired(defaultStore, Date.now());
 
   const code = (req.params.code ?? '').toUpperCase();
   const role = parseRole(req.params.role);
@@ -81,7 +80,7 @@ export async function exchangeIceHandler(
   const token = bearerToken(req);
   if (!token) return { status: 401, jsonBody: { error: 'no_token' } };
 
-  const session = defaultStore.getSession(code);
+  const session = await defaultStore.getSession(code);
   if (!session) return { status: 404, jsonBody: { error: 'not_found' } };
 
   if (req.method === 'POST') {
@@ -100,12 +99,10 @@ export async function exchangeIceHandler(
     if (body !== null && (typeof body !== 'object' || Array.isArray(body))) {
       return { status: 400, jsonBody: { error: 'bad_candidate' } };
     }
-    const queue = role === 'host' ? session.hostIce : session.joinerIce;
-    if (queue.length >= MAX_QUEUE) {
-      return { status: 429, jsonBody: { error: 'queue_full' } };
-    }
-    queue.push(JSON.stringify(body));
-    ctx.log(`ice post: code=${code} role=${role} count=${queue.length}`);
+    const result = await defaultStore.appendIce(code, role, JSON.stringify(body));
+    if (result === 'not_found') return { status: 404, jsonBody: { error: 'not_found' } };
+    if (result === 'queue_full') return { status: 429, jsonBody: { error: 'queue_full' } };
+    ctx.log(`ice post: code=${code} role=${role}`);
     return { status: 200, jsonBody: { ok: true } };
   }
 
@@ -115,15 +112,10 @@ export async function exchangeIceHandler(
     }
     const deadline = Date.now() + POLL_TIMEOUT_MS;
     while (Date.now() < deadline) {
-      const fresh = defaultStore.getSession(code);
-      if (!fresh) return { status: 404, jsonBody: { error: 'not_found' } };
-      const queue = role === 'host' ? fresh.hostIce : fresh.joinerIce;
-      if (queue.length > 0) {
-        // Drain atomically: splice empties the array so the next
-        // poll sees only new arrivals.
-        const drained = queue.splice(0, queue.length);
-        const candidates = drained.map((s) => JSON.parse(s) as unknown);
-        return { status: 200, jsonBody: { candidates } };
+      const drained = await defaultStore.drainIce(code, role);
+      if (!drained.found) return { status: 404, jsonBody: { error: 'not_found' } };
+      if (drained.candidates.length > 0) {
+        return { status: 200, jsonBody: { candidates: drained.candidates } };
       }
       await sleep(POLL_INTERVAL_MS);
     }

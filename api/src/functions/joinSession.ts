@@ -35,7 +35,7 @@ export async function joinSessionHandler(
     return { status: 400, jsonBody: { error: 'bad_code' } };
   }
   try {
-    const { joinerToken } = defaultStore.joinSession(code);
+    const { joinerToken } = await defaultStore.joinSession(code);
     ctx.log(`session joined: ${code}`);
     return { status: 200, jsonBody: { joinerToken } };
   } catch (err) {

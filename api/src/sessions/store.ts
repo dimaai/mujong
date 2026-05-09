@@ -2,27 +2,34 @@
 // api/src/sessions/store.ts
 //
 // PURPOSE
-//   In-memory session store for the v1 signaling backend
-//   (IMPLEMENTATION_PLAN Step 13).
+//   Pure session-store abstraction shared by every signaling
+//   HTTP handler. Kept host-agnostic so the same interface is
+//   satisfied by:
+//     - the in-memory `createStore` factory below (tests +
+//       offline `func start` development)
+//     - `tableStore.ts` (Azure Table Storage, used in the
+//       deployed Static Web App)
 //
-//   Pure module: no @azure/functions, no Node-only globals
-//   beyond `Map`. The clock and RNG are injected so the same
-//   code can be unit-tested deterministically and re-hosted
-//   later if we move off Azure Functions.
+//   The methods are intentionally narrow: instead of exposing
+//   `updateSession(code, fn)` (which assumes in-place mutation),
+//   we model each write the handlers actually need:
 //
-//   What it owns:
-//     1. The `Session` record shape.
-//     2. A factory `createStore(deps)` that returns a small
-//        API: `createSession`, `joinSession`, `getSession`,
-//        `deleteSession`, `size`.
-//     3. Typed errors so HTTP handlers can map them to status
-//        codes without sniffing strings.
+//     - `setSdp`     — overwrite a single SDP slot
+//     - `appendIce`  — push one candidate onto a slot's queue
+//     - `drainIce`   — atomically take everything currently in
+//                      a slot's queue and return it
+//
+//   This shape lets the table-backed store implement each
+//   operation as a get → mutate → replace-with-ETag cycle while
+//   the in-memory store keeps the cheap `Map` mutation it had
+//   before. Callers don't care which one they're talking to.
 // ============================================================
 
 /**
  * One pending or in-progress signaling session, keyed by an
- * invitation code. SDP/ICE fields are wired by Step 14; they
- * live on the record now so we don't reshape it later.
+ * invitation code. SDP / ICE fields hold the per-role state
+ * exchanged over the relay. ICE arrays hold raw JSON strings
+ * so this module never has to parse RTC candidate shapes.
  */
 export interface Session {
   code: string;
@@ -35,24 +42,21 @@ export interface Session {
   joinerIce: string[];
 }
 
+/** Which slot a write/read targets. */
+export type SessionRole = 'host' | 'joiner';
+
+/** Sanity cap on a single slot's ICE queue length. */
+export const MAX_ICE_QUEUE = 256;
+
 /**
- * Dependencies the store needs but does not own. Injecting
- * them keeps the store deterministic in tests.
- *
- *   now          — wall-clock provider (ms since epoch)
- *   randomCode   — invitation-code generator; the store handles
- *                  collisions by re-calling this until it gets
- *                  a fresh code or `maxAttempts` is exhausted
- *   randomToken  — opaque bearer-token generator
- *   maxAttempts  — collision-retry budget for `createSession`
- *                  (default 8). Practically infinite given a
- *                  31^6 ≈ 887M code space, but bounded so a
- *                  broken RNG can't loop forever.
+ * Dependencies the in-memory store needs but does not own.
+ * Injected so tests stay deterministic.
  */
 export interface StoreDeps {
   now: () => number;
   randomCode: () => string;
   randomToken: () => string;
+  /** Collision-retry budget for `createSession`. Defaults to 8. */
   maxAttempts?: number;
 }
 
@@ -77,88 +81,147 @@ export class SessionAlreadyJoinedError extends Error {
   }
 }
 
+/** Result of `appendIce`. Strings let handlers map directly to HTTP. */
+export type AppendIceResult = 'ok' | 'not_found' | 'queue_full';
+
+/** Result of `drainIce`. */
+export type DrainIceResult =
+  | { found: true; candidates: unknown[] }
+  | { found: false };
+
 export interface SessionStore {
-  /** Create a new session; returns its code and the host's bearer token. */
-  createSession(): { code: string; hostToken: string };
-  /** Mark a session as joined; returns the joiner's bearer token. */
-  joinSession(code: string): { joinerToken: string };
-  /** Read-only lookup. Undefined if the code is unknown. */
-  getSession(code: string): Session | undefined;
+  /** Allocate a new session and return its code + host bearer token. */
+  createSession(): Promise<{ code: string; hostToken: string }>;
+
+  /** Mark a session as joined and return the joiner's bearer token. */
+  joinSession(code: string): Promise<{ joinerToken: string }>;
+
+  /** Read-only snapshot. Resolves to `undefined` when the code is unknown. */
+  getSession(code: string): Promise<Session | undefined>;
+
+  /** Overwrite the SDP slot for `role`. Resolves `false` when not found. */
+  setSdp(code: string, role: SessionRole, sdp: string): Promise<boolean>;
+
   /**
-   * Mutate a session in place via a callback. Returns `false` if
-   * the code is unknown, otherwise the callback's return value.
-   * Step 14 needs this for SDP/ICE writes.
+   * Append a single ICE candidate (already JSON-serialised) to the
+   * slot's queue. Returns `'queue_full'` if the queue would exceed
+   * `MAX_ICE_QUEUE`, `'not_found'` for an unknown code, else `'ok'`.
    */
-  updateSession<R>(code: string, fn: (s: Session) => R): R | false;
+  appendIce(
+    code: string,
+    role: SessionRole,
+    candidateJson: string,
+  ): Promise<AppendIceResult>;
+
+  /**
+   * Drain the slot's queue: returns whatever was queued and clears
+   * the slot atomically (with respect to other callers of the same
+   * store). The candidates are parsed back to `unknown` for the
+   * caller's convenience — handlers re-serialise them on the wire.
+   */
+  drainIce(code: string, role: SessionRole): Promise<DrainIceResult>;
+
   /** Returns `true` if a session was removed. */
-  deleteSession(code: string): boolean;
-  /**
-   * Drop every session with `createdAt < beforeMs`. Returns the
-   * number removed. Step 14's TTL sweep calls this on every
-   * request — cheap because the map stays small in v1.
-   */
-  prune(beforeMs: number): number;
-  /** Number of live sessions. Useful for tests + future telemetry. */
-  size(): number;
+  deleteSession(code: string): Promise<boolean>;
+
+  /** Drop every session with `createdAt < beforeMs`. Returns count removed. */
+  prune(beforeMs: number): Promise<number>;
 }
 
 /**
- * Build a session store backed by a private `Map`. Each call
- * yields an isolated store, which is what tests want. The
- * production singleton lives in `defaultStore.ts`.
+ * Build an in-memory session store backed by a private `Map`.
+ * Production wiring lives in `defaultStore.ts`; this is what
+ * unit tests and offline `func start` runs use.
  */
 export function createStore(deps: StoreDeps): SessionStore {
   const sessions = new Map<string, Session>();
   const maxAttempts = deps.maxAttempts ?? 8;
 
-  function createSession(): { code: string; hostToken: string } {
+  // Defensive copy on read so callers can't accidentally mutate
+  // the live map. Keeps semantics aligned with the table store
+  // (which always returns fresh objects).
+  function snapshot(s: Session): Session {
+    return {
+      ...s,
+      hostIce: [...s.hostIce],
+      joinerIce: [...s.joinerIce],
+    };
+  }
+
+  async function createSession(): Promise<{ code: string; hostToken: string }> {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const code = deps.randomCode();
-      if (sessions.has(code)) {
-        continue;
-      }
+      if (sessions.has(code)) continue;
       const hostToken = deps.randomToken();
-      const session: Session = {
+      sessions.set(code, {
         code,
         createdAt: deps.now(),
         hostToken,
         hostIce: [],
         joinerIce: [],
-      };
-      sessions.set(code, session);
+      });
       return { code, hostToken };
     }
     throw new SessionCollisionError(maxAttempts);
   }
 
-  function joinSession(code: string): { joinerToken: string } {
+  async function joinSession(code: string): Promise<{ joinerToken: string }> {
     const session = sessions.get(code);
-    if (!session) {
-      throw new SessionNotFoundError(code);
-    }
-    if (session.joinerToken) {
-      throw new SessionAlreadyJoinedError(code);
-    }
+    if (!session) throw new SessionNotFoundError(code);
+    if (session.joinerToken) throw new SessionAlreadyJoinedError(code);
     const joinerToken = deps.randomToken();
     session.joinerToken = joinerToken;
     return { joinerToken };
   }
 
-  function getSession(code: string): Session | undefined {
-    return sessions.get(code);
+  async function getSession(code: string): Promise<Session | undefined> {
+    const s = sessions.get(code);
+    return s ? snapshot(s) : undefined;
   }
 
-  function updateSession<R>(code: string, fn: (s: Session) => R): R | false {
+  async function setSdp(
+    code: string,
+    role: SessionRole,
+    sdp: string,
+  ): Promise<boolean> {
     const s = sessions.get(code);
     if (!s) return false;
-    return fn(s);
+    if (role === 'host') s.hostSdp = sdp;
+    else s.joinerSdp = sdp;
+    return true;
   }
 
-  function deleteSession(code: string): boolean {
+  async function appendIce(
+    code: string,
+    role: SessionRole,
+    candidateJson: string,
+  ): Promise<AppendIceResult> {
+    const s = sessions.get(code);
+    if (!s) return 'not_found';
+    const queue = role === 'host' ? s.hostIce : s.joinerIce;
+    if (queue.length >= MAX_ICE_QUEUE) return 'queue_full';
+    queue.push(candidateJson);
+    return 'ok';
+  }
+
+  async function drainIce(
+    code: string,
+    role: SessionRole,
+  ): Promise<DrainIceResult> {
+    const s = sessions.get(code);
+    if (!s) return { found: false };
+    const queue = role === 'host' ? s.hostIce : s.joinerIce;
+    if (queue.length === 0) return { found: true, candidates: [] };
+    const drained = queue.splice(0, queue.length);
+    const candidates = drained.map((j) => JSON.parse(j) as unknown);
+    return { found: true, candidates };
+  }
+
+  async function deleteSession(code: string): Promise<boolean> {
     return sessions.delete(code);
   }
 
-  function prune(beforeMs: number): number {
+  async function prune(beforeMs: number): Promise<number> {
     let removed = 0;
     for (const [code, s] of sessions) {
       if (s.createdAt < beforeMs) {
@@ -169,9 +232,14 @@ export function createStore(deps: StoreDeps): SessionStore {
     return removed;
   }
 
-  function size(): number {
-    return sessions.size;
-  }
-
-  return { createSession, joinSession, getSession, updateSession, deleteSession, prune, size };
+  return {
+    createSession,
+    joinSession,
+    getSession,
+    setSdp,
+    appendIce,
+    drainIce,
+    deleteSession,
+    prune,
+  };
 }

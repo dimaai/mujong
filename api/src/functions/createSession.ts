@@ -21,7 +21,7 @@ export async function createSessionHandler(
   ctx: InvocationContext,
 ): Promise<HttpResponseInit> {
   try {
-    const { code, hostToken } = defaultStore.createSession();
+    const { code, hostToken } = await defaultStore.createSession();
     ctx.log(`session created: ${code}`);
     return {
       status: 201,
