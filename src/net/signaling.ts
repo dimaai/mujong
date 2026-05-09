@@ -138,13 +138,15 @@ export function createSignalingClient(
   async function check(res: Response): Promise<Response> {
     if (res.ok) return res;
     let errCode = `http_${res.status}`;
+    let detail: string | undefined;
     try {
-      const body = (await res.clone().json()) as JsonError;
+      const body = (await res.clone().json()) as JsonError & { detail?: string };
       if (typeof body?.error === 'string') errCode = body.error;
+      if (typeof body?.detail === 'string') detail = body.detail;
     } catch {
       // body wasn't JSON — fine, keep the generic code
     }
-    throw new SignalingError(res.status, errCode);
+    throw new SignalingError(res.status, errCode, detail);
   }
 
   /** Re-throw an AbortError as our typed `SignalingAbortError`. */

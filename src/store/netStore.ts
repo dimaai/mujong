@@ -212,7 +212,12 @@ export const useNetStore = create<NetState>((set, get) => {
         case 'bad_token':
           return 'Authorisation failed.';
         default:
-          return `Signaling error: ${err.code}`;
+          // Server-supplied detail (e.g. a misconfigured table store)
+          // is the most useful thing to show during setup; fall back
+          // to just the code if no detail is present.
+          return err.message
+            ? `Signaling error: ${err.code} — ${err.message}`
+            : `Signaling error: ${err.code}`;
       }
     }
     if (err instanceof Error) return err.message;

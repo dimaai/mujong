@@ -32,8 +32,12 @@ export async function createSessionHandler(
       ctx.error(err.message);
       return { status: 500, jsonBody: { error: 'collision' } };
     }
+    // Surface a short reason string so a misconfigured deploy
+    // (bad table connection string, missing permissions, etc.) is
+    // visible to the client without leaking stack traces.
+    const reason = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
     ctx.error('createSession failed', err);
-    return { status: 500, jsonBody: { error: 'internal' } };
+    return { status: 500, jsonBody: { error: 'internal', detail: reason } };
   }
 }
 
