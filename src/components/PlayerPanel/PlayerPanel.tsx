@@ -72,6 +72,12 @@ export function PlayerPanel({
 }: PlayerPanelProps) {
   const myFigures = figures.filter((f) => f.playerId === playerId);
 
+  // Group instances by figureTypeId so each unique type renders as a single
+  // slot with a "× N" count badge instead of N separate slots. This keeps the
+  // panel narrow on small board sizes (e.g. 6×7) and lets the user see at a
+  // glance how many of each type are still available to pick.
+  const groups = groupByType(myFigures);
+
   const enlargedHeight = cellSize; // exactly 1 board square
   const minimizedHeight = Math.round(cellSize / 2);
 
@@ -114,18 +120,22 @@ export function PlayerPanel({
         style={{ opacity: isEnlarged ? 1 : 0, pointerEvents: isEnlarged ? 'auto' : 'none' }}
       >
         <div className={styles.figuresArea}>
-          {myFigures.map((instance) => (
-            <CompactFigureSlot
-              key={instance.instanceId}
-              instance={instance}
-              isSelected={instance.instanceId === selectedInstanceId}
+          {groups.map((group) => (
+            <TypeSlot
+              key={group.figureTypeId}
+              group={group}
+              isSelected={
+                selectedInstanceId !== null &&
+                group.availableInstances.some((i) => i.instanceId === selectedInstanceId)
+              }
               isActive={isActive}
               playerColor={playerColor}
               size={enlargedSlotSize}
               flipped={false}
               onClick={() => {
-                if (isActive && instance.status === 'available') {
-                  onSelectFigure(instance.instanceId);
+                const next = group.availableInstances[0];
+                if (isActive && next) {
+                  onSelectFigure(next.instanceId);
                 }
               }}
             />
@@ -161,18 +171,22 @@ export function PlayerPanel({
         </span>
 
         <div className={styles.figuresRow}>
-          {myFigures.map((instance) => (
-            <CompactFigureSlot
-              key={instance.instanceId}
-              instance={instance}
-              isSelected={instance.instanceId === selectedInstanceId}
+          {groups.map((group) => (
+            <TypeSlot
+              key={group.figureTypeId}
+              group={group}
+              isSelected={
+                selectedInstanceId !== null &&
+                group.availableInstances.some((i) => i.instanceId === selectedInstanceId)
+              }
               isActive={isActive}
               playerColor={playerColor}
               size={minimizedSlotSize}
               flipped={false}
               onClick={() => {
-                if (isActive && instance.status === 'available') {
-                  onSelectFigure(instance.instanceId);
+                const next = group.availableInstances[0];
+                if (isActive && next) {
+                  onSelectFigure(next.instanceId);
                 }
               }}
             />
@@ -198,10 +212,41 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-// ── Sub-component: CompactFigureSlot ──────────────────────────
+/**
+ * Like `hexToRgba` but multiplies each channel by `darken` (0..1, where 1
+ * keeps the original color and lower values move toward black). Used for the
+ * count badge so it visually echoes the player's timer-bar color but reads as
+ * a slightly darker shade.
+ */
+function hexDarkerRgba(hex: string, darken: number, alpha: number): string {
+  let h = hex.replace('#', '');
+  if (h.length === 3) {
+    h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+  }
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  if (isNaN(r) || isNaN(g) || isNaN(b)) return hex;
+  const dr = Math.max(0, Math.min(255, Math.round(r * darken)));
+  const dg = Math.max(0, Math.min(255, Math.round(g * darken)));
+  const db = Math.max(0, Math.min(255, Math.round(b * darken)));
+  return `rgba(${dr}, ${dg}, ${db}, ${alpha})`;
+}
 
-interface CompactFigureSlotProps {
-  instance: PlayerFigureInstance;
+// ── Sub-component: TypeSlot ───────────────────────────────────
+
+/**
+ * One slot per unique figure type, showing the icon plus an "× N" count
+ * badge of how many of that type are still available to pick. When N reaches
+ * zero the slot is dimmed and non-interactive — it stays visible so the
+ * player can still see what types they had at the start of the game.
+ *
+ * Inputs:  the type-group, visual state flags, size, click callback
+ * Outputs: fires onClick when the slot is clickable (N > 0 and active turn)
+ * Side effects: none
+ */
+interface TypeSlotProps {
+  group: TypeGroup;
   isSelected: boolean;
   isActive: boolean;
   playerColor: string;
@@ -212,56 +257,89 @@ interface CompactFigureSlotProps {
   onClick: () => void;
 }
 
-/**
- * Renders a single figure token within the player panel.
- *
- * Inputs:  instance data, visual state flags, size, click callback
- * Outputs: fires onClick when the slot is clickable
- * Side effects: none
- */
-function CompactFigureSlot({
-  instance,
+function TypeSlot({
+  group,
   isSelected,
   isActive,
   playerColor,
   size,
   flipped,
   onClick,
-}: CompactFigureSlotProps) {
-  const isClickable = isActive && instance.status === 'available';
-  const figureType = FIGURE_TYPE_MAP[instance.figureTypeId];
+}: TypeSlotProps) {
+  const figureType = FIGURE_TYPE_MAP[group.figureTypeId];
+  const remaining = group.availableInstances.length;
+  const exhausted = remaining === 0;
+  const isClickable = isActive && !exhausted;
 
   return (
     <div
       className={[
         styles.slot,
-        instance.status === 'placed' ? styles.placed : '',
-        instance.status === 'taken' ? styles.taken : '',
+        exhausted ? styles.exhausted : '',
         isSelected ? styles.slotSelected : '',
         isClickable ? styles.clickable : '',
       ]
         .filter(Boolean)
         .join(' ')}
       style={{ width: size, height: size }}
-      onClick={onClick}
+      onClick={() => {
+        if (isClickable) onClick();
+      }}
       title={
         figureType
-          ? `${figureType.name} — V:${figureType.movement.vertical} H:${figureType.movement.horizontal} D:${figureType.movement.diagonal}`
-          : instance.figureTypeId
+          ? `${figureType.name} (${remaining} left) — V:${figureType.movement.vertical} H:${figureType.movement.horizontal} D:${figureType.movement.diagonal}`
+          : group.figureTypeId
       }
     >
       <FigureIcon
-        figureTypeId={instance.figureTypeId}
+        figureTypeId={group.figureTypeId}
         color={playerColor}
         size={Math.max(12, size - 4)}
         flipped={flipped}
       />
 
-      {instance.status === 'taken' && (
-        <span className={styles.crossOut} aria-label="captured">
-          ✕
-        </span>
-      )}
+      <span
+        className={styles.countBadge}
+        style={{
+          // Scale badge text with slot size so it stays legible on small boards.
+          fontSize: Math.max(9, Math.round(size * 0.28)),
+          // Match the player's timer-bar tone (~50% alpha) but slightly darker
+          // so the white "×N" text stays legible on light colors.
+          backgroundColor: hexDarkerRgba(playerColor, 0.7, 0.5),
+        }}
+        aria-label={`${remaining} remaining`}
+      >
+        ×{remaining}
+      </span>
     </div>
   );
+}
+
+// ── Helpers ───────────────────────────────────────────────────
+
+/**
+ * One row in the panel — collapses N instances of the same `figureTypeId` into
+ * a single visual slot. `availableInstances` holds the still-pickable ones in
+ * their original order so the first one can be selected on click.
+ */
+interface TypeGroup {
+  figureTypeId: string;
+  total: number;
+  availableInstances: PlayerFigureInstance[];
+}
+
+function groupByType(instances: PlayerFigureInstance[]): TypeGroup[] {
+  const order: string[] = [];
+  const map = new Map<string, TypeGroup>();
+  for (const inst of instances) {
+    let g = map.get(inst.figureTypeId);
+    if (!g) {
+      g = { figureTypeId: inst.figureTypeId, total: 0, availableInstances: [] };
+      map.set(inst.figureTypeId, g);
+      order.push(inst.figureTypeId);
+    }
+    g.total += 1;
+    if (inst.status === 'available') g.availableInstances.push(inst);
+  }
+  return order.map((id) => map.get(id)!);
 }

@@ -237,6 +237,82 @@ Companion to [ARCHITECTURE.md](ARCHITECTURE.md). Work is sliced into small, inde
 
 ---
 
+## Next 5 steps (continue here, after Step 15 lands)
+
+> Step 15 leaves us with a working lobby that exchanges `HELLO` profiles but does not start a game. Steps 16–20 carry the connection through to a fully playable, fault-tolerant networked match. The slicing keeps gameplay code untouched until Step 17, and keeps fault-handling separate from the happy path so each PR is independently reviewable.
+
+### Step 16 — Host-authoritative game start over the wire
+1. **Step name:** Lobby's "Start Game" actually starts a synchronised game on both peers.
+2. **Files involved:**
+   - [src/net/protocol.ts](src/net/protocol.ts) *(touch — add `START` verb carrying `options`, `profiles: [Profile, Profile]`, `hostPlayerIndex: 0|1`; bump `PROTOCOL_VERSION` only if a shape changes)*
+   - [src/net/__tests__/protocol.test.ts](src/net/__tests__/protocol.test.ts) *(touch — add round-trip + malformed-input cases for `START`)*
+   - [src/store/netStore.ts](src/store/netStore.ts) *(touch — add `localPlayerIndex: 0|1|null`, `mode: 'host'|'join'|null`; new `startNetworkGame()` action on host; on joiner, route incoming `START` to `useGameStore.startGame` and navigate to `/play`)*
+   - [src/components/NetworkLobby/NetworkLobby.tsx](src/components/NetworkLobby/NetworkLobby.tsx) *(touch — un-stub "Start Game" on host once `status === 'connected'`; reads `useSettingsStore` + both `Profile`s)*
+   - [src/store/gameStore.ts](src/store/gameStore.ts) *(touch — `startGame` already accepts `{options, profiles}`; add an optional `seed?: string` field carried in `START` so future RNG (e.g. wall placement variants) is identical on both sides)*
+3. **What will be implemented:**
+   - Host is the source of truth for game configuration. On click it: builds the initial `GameState`, sends `START`, then calls `startGame` locally and `router.push('/play')`.
+   - Joiner waits for `START`, applies the same inputs, and navigates. Both peers reach `/play` with byte-identical `GameState` (verified by a debug `JSON.stringify` log in dev only).
+   - Player → device mapping is decided by host: host is `player1` (index 0) by default in v1; we can flip later. `netStore.localPlayerIndex` is the only place that knows which side this device controls.
+   - **No move broadcasting yet** — Step 17 wires that. This step proves the synchronised start.
+4. **STOP condition:** Two browser tabs hosted via `npm run dev`: A hosts → B joins → A clicks Start → both tabs land on `/play` showing the same board, names, colors, and current-player highlight. Closing either tab returns the other to a clean lobby state. `npm run type-check`, `npm run lint`, tests green.
+
+### Step 17 — Broadcast & apply `ACTION` (Phase G-3 core)
+1. **Step name:** Each `executeAction` round-trips through the DataChannel so both boards stay in lockstep.
+2. **Files involved:**
+   - [src/store/gameStore.ts](src/store/gameStore.ts) *(touch — add `mode: 'local'|'network'` and an in-memory `actionLog: { seq, turnNumber, action }[]`; `executeAction` becomes `executeAction(action, { source: 'local'|'remote' })`)*
+   - [src/store/netStore.ts](src/store/netStore.ts) *(touch — register a peer `'message'` handler that filters `ACTION` and forwards to `useGameStore.applyRemoteAction`)*
+   - [src/components/Board/Board.tsx](src/components/Board/Board.tsx) and [src/components/PlayerPanel/PlayerPanel.tsx](src/components/PlayerPanel/PlayerPanel.tsx) *(touch — disable interactions when `mode === 'network'` and `currentPlayer !== localPlayerIndex`)*
+   - `src/store/__tests__/gameStore.network.test.ts` *(new — drive a fake peer through a 4-move exchange; assert both stores converge)*
+3. **What will be implemented:**
+   - Local-origin actions: apply → append to `actionLog` → `peer.send({ type: 'ACTION', action, turnNumber })`.
+   - Remote-origin actions: validate `senderId === opponentId`, `seq === expected`, `turnNumber === state.turnNumber`. On any mismatch, log to the ring buffer and **do not** apply (real recovery lands in Step 20).
+   - The reducer path is unchanged — only the entry point splits by `source`. This keeps the existing rules engine and tests untouched.
+   - UI hint: when it is the remote player's turn, show a subtle "Opponent's turn" banner (single span, no new component).
+4. **STOP condition:** Two tabs play a full game end-to-end with every move appearing on both boards within ~100 ms on localhost. Trying to click on the board on the wrong-turn side does nothing. Game-end (win/draw) fires on both sides simultaneously.
+
+### Step 18 — Heartbeat + connection-quality indicator (H-1)
+1. **Step name:** Continuous PING/PONG so the UI can show real connection health.
+2. **Files involved:**
+   - [src/store/netStore.ts](src/store/netStore.ts) *(touch — add `quality: 'good'|'slow'|'unstable'|null`, `lastRttMs: number|null`, `lastSeenAt: number|null`; start a 5 s interval on `'open'`, clear on `leave`)*
+   - [src/net/peer.ts](src/net/peer.ts) *(touch — convenience `sendPing()` that stamps `seq` and resolves the matching `PONG`)*
+   - [src/components/GameCanvas/GameCanvas.tsx](src/components/GameCanvas/GameCanvas.tsx) *(touch — render a small connection pill from `useNetStore` when `mode === 'network'`)*
+3. **What will be implemented:**
+   - Sliding RTT window of the last 5 PONGs, mean RTT drives the pill: `< 150 ms` good (green), `< 400 ms` slow (amber), else unstable (red).
+   - 15 s without a PONG → `unstable`; 30 s → trigger Step 19's reconnect flow (signal exposed as a store event, no UI from this step).
+   - All timers cleaned up in `leave()` and on `beforeunload` so no leaks.
+4. **STOP condition:** With two tabs connected, the pill shows green and a number around 1–10 ms locally. Throttling DevTools network to "Slow 3G" turns it amber; killing the peer tab turns it red within 30 s. Tests: a fake-clock unit test confirms the threshold transitions.
+
+### Step 19 — Reconnect overlay + grace timer + claim-win (H-2 + H-3)
+1. **Step name:** Fault-handling UI so a flaky network or a closed tab doesn't strand the game.
+2. **Files involved:**
+   - [src/store/netStore.ts](src/store/netStore.ts) *(touch — persist `{ code, role, hostToken|joinerToken }` to `STORAGE_KEYS.netSession` so a refresh can re-attach; add `attemptReconnect()` that re-runs `connectViaSignaling` if the session is still alive)*
+   - [src/persistence/keys.ts](src/persistence/keys.ts) *(touch — `netSession: 'mojong.net.v1'`)*
+   - `src/components/Network/ReconnectOverlay.tsx` *(new — full-screen modal with countdown and "Claim win" button; pure presentational)*
+   - [src/components/GameCanvas/GameCanvas.tsx](src/components/GameCanvas/GameCanvas.tsx) *(touch — mount the overlay when `quality === 'unstable'` for >X s)*
+   - [src/store/gameStore.ts](src/store/gameStore.ts) *(touch — `claimWin(reason: 'forfeit'|'timeout')` ends the game with the local player as winner)*
+3. **What will be implemented:**
+   - On `'closed' | 'failed'` or `unstable` for 30 s: show overlay with a 60 s countdown.
+   - Auto-reconnect runs in the background: `attemptReconnect()` re-uses the persisted session record (signaling sessions still live within their 10-min TTL from Step 14).
+   - If reconnection succeeds before the timer expires, both peers send a `RESYNC_REQ` (consumed in Step 20 — for now they no-op gracefully) and the overlay closes.
+   - After the grace period: "Claim win" enabled → calls `claimWin('timeout')` and sends `BYE { reason: 'timeout' }`.
+   - Manual forfeit ("Resign" button on the overlay too) sends `BYE { reason: 'forfeit' }` and ends the game with the opponent as winner.
+4. **STOP condition:** With two tabs mid-game, closing tab B for 10 s then reopening it auto-reconnects without user action; closing for 60+ s lets tab A claim a win and returns both to MainMenu cleanly. No orphan `RTCPeerConnection` instances after the flow (verified via `chrome://webrtc-internals`).
+
+### Step 20 — `RESYNC_REQ` / `RESYNC_RES` to recover missed actions
+1. **Step name:** A reconnected peer catches up via the action log instead of resyncing the whole `GameState`.
+2. **Files involved:**
+   - [src/store/gameStore.ts](src/store/gameStore.ts) *(touch — expose `getActionsSince(seq): { seq, action, turnNumber }[]` reading the in-memory `actionLog` from Step 17)*
+   - [src/store/netStore.ts](src/store/netStore.ts) *(touch — handle incoming `RESYNC_REQ` by sending `RESYNC_RES`; handle incoming `RESYNC_RES` by feeding actions to `applyRemoteAction` in order)*
+   - `src/store/__tests__/gameStore.resync.test.ts` *(new — simulate a 3-action gap; assert convergence after resync)*
+3. **What will be implemented:**
+   - On any `seq` gap detected in Step 17's validator, the receiver sends `RESYNC_REQ { fromSeq: expectedSeq }` (rate-limited to once per 2 s).
+   - Sender replies with the slice of its `actionLog` from `fromSeq` onwards. Empty slice = "you're caught up".
+   - The receiver applies the slice in order through the same `applyRemoteAction` path; the validator now tolerates a contiguous batch.
+   - Bound the log: trim entries older than the last 200 turns to keep memory flat (a real game is far shorter; this is just paranoia).
+4. **STOP condition:** Programmatically dropping every other outgoing `ACTION` from tab A for 5 s (toggleable dev-only switch in the ring-buffer logger UI, optional) results in tab B catching up automatically once the drop stops. Unit test green; no regressions in Step 17's lockstep test.
+
+---
+
 ## Subsequent phases (for context only — not the next 5 steps)
 
 These are listed so reviewers see the shape of the work. They are **not** approved yet and will be sliced into their own small steps when their turn comes. Order is suggested, not contractual.

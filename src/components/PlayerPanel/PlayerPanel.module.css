@@ -40,12 +40,23 @@
   display: flex;
   flex-direction: row;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 4px;
-  flex: 1;
+  flex: 1 1 0;
   min-width: 0;
   height: 100%;
   padding: 0 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.figuresArea::-webkit-scrollbar {
+  height: 4px;
+}
+.figuresArea::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
 }
 
 /* ── Sandwich-menu separator + hamburger ───────────── */
@@ -137,6 +148,13 @@
   opacity: 0.3;
 }
 
+/* All instances of this figure type are placed or captured —
+   the slot stays visible but is dimmed and non-interactive. */
+.exhausted {
+  opacity: 0.3;
+  cursor: default;
+}
+
 .slotSelected {
   box-shadow: 0 0 0 3px #facc15;
 }
@@ -147,6 +165,26 @@
 
 .clickable:hover {
   filter: brightness(1.15);
+}
+
+/* Small "× N" overlay in the bottom-right of a type slot.
+   Font size is set inline based on slot size for legibility. */
+.countBadge {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  /* background-color set inline via the player color (darker tone). */
+  color: #fff;
+  border-radius: 8px;
+  padding: 0 4px;
+  line-height: 1.4;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+  letter-spacing: 0.02em;
+  /* Subtle outline so the badge stays legible against any board background. */
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.55);
 }
 
 .crossOut {
