@@ -246,6 +246,15 @@ export interface NetState {
    * Side fx: one `DRAW_RESPONSE` frame on the DataChannel.
    */
   sendDrawResponse: (accepted: boolean) => void;
+
+  /**
+   * Withdraw a pending draw offer. The offerer calls this when
+   * they click "Cancel" before the receiver has answered. The
+   * peer clears their pending offer panel.
+   *
+   * Side fx: one `DRAW_CANCEL` frame on the DataChannel.
+   */
+  sendDrawCancel: () => void;
 }
 
 /** Invitation code shape (matches the server's regex). */
@@ -518,6 +527,19 @@ export const useNetStore = create<NetState>((set, get) => {
           }
         } catch (err) {
           logger.log('warn', 'draw.response.apply', String(err));
+        }
+        return;
+      }
+
+      if (msg.type === 'DRAW_CANCEL') {
+        // Offerer withdrew. Clear our local pending-offer state
+        // so the Accept/Decline panel disappears. Equivalent to
+        // a local rejectDraw, but driven by the peer's intent.
+        if (msg.seq === expectedRemoteSeq) expectedRemoteSeq = msg.seq + 1;
+        try {
+          useGameStore.getState().rejectDraw();
+        } catch (err) {
+          logger.log('warn', 'draw.cancel.apply', String(err));
         }
         return;
       }
@@ -1131,6 +1153,22 @@ export const useNetStore = create<NetState>((set, get) => {
           t: Date.now(),
           type: 'DRAW_RESPONSE',
           accepted,
+        });
+      } catch {
+        // ignore — best effort
+      }
+    },
+
+    sendDrawCancel() {
+      if (!currentPeer) return;
+      try {
+        currentPeer.send({
+          v: PROTOCOL_VERSION,
+          gameId: get().code ?? '',
+          senderId: getDeviceId(),
+          seq: outgoingSeq++,
+          t: Date.now(),
+          type: 'DRAW_CANCEL',
         });
       } catch {
         // ignore — best effort

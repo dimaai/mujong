@@ -117,8 +117,11 @@ export type NetMessage =
   //   DRAW_RESPONSE — receiver's answer. `accepted: true` ends the
   //                   game as a draw on both sides; `false` just
   //                   clears the offer.
+  //   DRAW_CANCEL   — offerer withdrew before the receiver answered.
+  //                   Clears the pending offer on the receiver.
   | (NetEnvelope & { type: 'DRAW_OFFER'; offererId: string })
-  | (NetEnvelope & { type: 'DRAW_RESPONSE'; accepted: boolean });
+  | (NetEnvelope & { type: 'DRAW_RESPONSE'; accepted: boolean })
+  | (NetEnvelope & { type: 'DRAW_CANCEL' });
 
 export type NetMessageType = NetMessage['type'];
 
@@ -247,6 +250,9 @@ export function decode(raw: string): NetMessage {
       }
       return ok(parsed);
     }
+    case 'DRAW_CANCEL':
+      // No extra fields — envelope alone is sufficient.
+      return ok(parsed);
     default:
       throw new NetProtocolError(`unknown message type: ${type}`);
   }

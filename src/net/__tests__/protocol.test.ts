@@ -96,6 +96,9 @@ const samples: Record<string, NetMessage> = {
       },
     ],
   },
+  DRAW_OFFER: { ...baseEnvelope, seq: 8, type: 'DRAW_OFFER', offererId: 'p1' },
+  DRAW_RESPONSE: { ...baseEnvelope, seq: 9, type: 'DRAW_RESPONSE', accepted: true },
+  DRAW_CANCEL: { ...baseEnvelope, seq: 10, type: 'DRAW_CANCEL' },
 };
 
 // ── 1. Round-trip ─────────────────────────────────────────────

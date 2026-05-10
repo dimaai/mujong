@@ -71,6 +71,7 @@ export function GameCanvas() {
   const netLastRtt = useNetStore((s) => s.lastRttMs);
   const sendDrawOffer = useNetStore((s) => s.sendDrawOffer);
   const sendDrawResponse = useNetStore((s) => s.sendDrawResponse);
+  const sendDrawCancel = useNetStore((s) => s.sendDrawCancel);
 
   // ── Responsive cell size ──────────────────────────────────
   useEffect(() => {
@@ -498,11 +499,16 @@ export function GameCanvas() {
                   </span>
                   <div className={styles.drawPanelButtons}>
                     {offererIsLocal ? (
-                      // The offerer can withdraw locally. In v1 there
-                      // is no DRAW_CANCEL verb yet, so the peer still
-                      // sees the offer until they respond — left as
-                      // a follow-up to keep this batch small.
-                      <button className={styles.menuBtn} onClick={rejectDraw}>
+                      // The offerer withdraws their pending offer.
+                      // In network mode we also send DRAW_CANCEL so
+                      // the receiver's Accept/Decline panel goes away.
+                      <button
+                        className={styles.menuBtn}
+                        onClick={() => {
+                          if (isNetwork) sendDrawCancel();
+                          rejectDraw();
+                        }}
+                      >
                         Cancel
                       </button>
                     ) : (
