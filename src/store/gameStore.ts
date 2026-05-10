@@ -26,7 +26,7 @@ import type {
 } from '../domain/types';
 import { FIGURE_TYPE_MAP, getFigureRosterFor } from '../data/figuretypes';
 import { BOARD_SIZE_MAP } from '../data/boardSizes';
-import { createInitialFigures, getFigureAt, placeWalls } from '../domain/board';
+import { createInitialFigures, getFigureAt, placeWalls, seededRng } from '../domain/board';
 import { getValidMoves, getValidPlacements, isWinningMove } from '../domain/rules';
 import { getEnvelope, removeItem, setEnvelope } from '../persistence/storage';
 import { STORAGE_KEYS } from '../persistence/keys';
@@ -368,8 +368,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     // Step 8: walls are deterministic terrain. Empty array when the
     // option is off so the rules engine simply has nothing to skip.
+    // In network mode we feed `placeWalls` a seeded RNG so both
+    // peers compute identical wall positions from the shared `seed`.
+    const wallsRng = seed ? seededRng(`walls:${seed}`) : Math.random;
     const walls = options.walls
-      ? placeWalls(sizePreset.width, sizePreset.height)
+      ? placeWalls(sizePreset.width, sizePreset.height, wallsRng)
       : [];
 
     const timerSeconds = options.timerMinutes * 60;

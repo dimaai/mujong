@@ -177,20 +177,44 @@ export function createInitialFigures(
 export function placeWalls(
   boardWidth: number,
   boardHeight: number,
+  rng: () => number = Math.random,
 ): Position[] {
   const midRow = Math.floor(boardHeight / 2);
   if (boardWidth <= 0) return [];
   if (boardWidth === 1) return [{ col: 0, row: midRow }];
 
-  const firstCol = Math.floor(Math.random() * boardWidth);
+  const firstCol = Math.floor(rng() * boardWidth);
   // Pick a second column uniformly from the remaining `boardWidth - 1`
   // options, then shift past `firstCol` to skip it. Cheaper and
   // bias-free vs. rejection sampling.
-  let secondCol = Math.floor(Math.random() * (boardWidth - 1));
+  let secondCol = Math.floor(rng() * (boardWidth - 1));
   if (secondCol >= firstCol) secondCol += 1;
 
   return [
     { col: firstCol, row: midRow },
     { col: secondCol, row: midRow },
   ];
+}
+
+/**
+ * Deterministic 32-bit PRNG (mulberry32). Seeded from a string so
+ * both peers in a network game can compute identical wall layouts
+ * from the shared `seed`. Not cryptographically secure — only used
+ * for game-setup randomness.
+ */
+export function seededRng(seed: string): () => number {
+  // FNV-1a 32-bit hash of the string → starting state.
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  let state = h >>> 0;
+  return () => {
+    state = (state + 0x6D2B79F5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }

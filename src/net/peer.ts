@@ -225,9 +225,20 @@ export function createPeer(options: CreatePeerOptions): Peer {
     ch.onopen = () => setState('open');
     ch.onclose = () => setState('closed');
     ch.onerror = (ev) => {
-      const err = (ev as RTCErrorEvent).error ?? new Error('datachannel error');
-      logger?.log('error', 'peer', { role, msg: 'datachannel error', err: String(err) });
-      emit('error', err);
+      const rtcErr = (ev as RTCErrorEvent).error;
+      // Chromium fires `onerror` with no `.error` payload when the
+      // channel is closed cleanly by the peer (e.g. tab close /
+      // BYE-driven teardown). Treat that as a normal close — the
+      // sibling `onclose` handler already flips state to 'closed'.
+      if (!rtcErr) return;
+      // SCTP "User Initiated Abort" is also benign — it surfaces
+      // when the local side closes its own channel.
+      const sctpAbort =
+        rtcErr.errorDetail === 'sctp-failure' &&
+        /User Initiated Abort/i.test(rtcErr.message ?? '');
+      if (sctpAbort) return;
+      logger?.log('error', 'peer', { role, msg: 'datachannel error', err: String(rtcErr) });
+      emit('error', rtcErr);
     };
     ch.onmessage = (ev: MessageEvent) => {
       if (typeof ev.data !== 'string') {
