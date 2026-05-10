@@ -40,8 +40,8 @@ import { createEnvelopeStorage } from '../persistence/storage';
 // when MainMenu finally reads from this store, the visible defaults
 // don't change for current users.
 
-const DEFAULT_PLAYER1: Profile = { name: 'Player 1', color: 'blue' };
-const DEFAULT_PLAYER2: Profile = { name: 'Player 2', color: 'red' };
+const DEFAULT_PLAYER1: Profile = { name: 'Player 1', color: '#1e88e5' };
+const DEFAULT_PLAYER2: Profile = { name: 'Player 2', color: '#e53935' };
 
 /** Which profile slot an action targets. */
 export type ProfileSlot = 'player1' | 'player2';

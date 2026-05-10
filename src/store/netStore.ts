@@ -27,6 +27,7 @@
 import { create } from 'zustand';
 
 import { getDeviceId } from '../persistence/ids';
+import { createNetLogger } from '../net/log';
 import { connectViaSignaling, createPeer, type Peer } from '../net/peer';
 import {
   PROTOCOL_VERSION,
@@ -148,7 +149,32 @@ export const useNetStore = create<NetState>((set, get) => {
     code: string,
     client: SignalingClient,
   ): Promise<void> {
-    const peer = createPeer({ role });
+    // Mirror net-layer logs to the browser console so a developer
+    // (or a tester opening F12) can see exactly where a handshake
+    // got stuck — gathering ICE, no candidates, signaling 4xx, etc.
+    // The ring-buffer logger keeps the last 200 entries in memory
+    // for a future debug overlay; the console mirror is just for
+    // immediate visibility.
+    const ringLogger = createNetLogger();
+    const logger = {
+      log(level: 'debug' | 'info' | 'warn' | 'error', tag: string, data?: unknown) {
+        ringLogger.log(level, tag, data);
+        const fn =
+          level === 'error'
+            ? console.error
+            : level === 'warn'
+              ? console.warn
+              : level === 'info'
+                ? console.info
+                : console.debug;
+        fn(`[mojong:${tag}]`, data ?? '');
+      },
+      snapshot: ringLogger.snapshot,
+      clear: ringLogger.clear,
+      size: ringLogger.size,
+    };
+
+    const peer = createPeer({ role, logger });
     currentPeer = peer;
 
     // Resolve once the peer's HELLO is decoded; reject on terminal
@@ -197,7 +223,7 @@ export const useNetStore = create<NetState>((set, get) => {
     });
 
     set({ status: 'connecting' });
-    await connectViaSignaling(peer, client, role);
+    await connectViaSignaling(peer, client, role, logger);
     const peerProfile = await helloPromise;
     set({ status: 'connected', peerProfile });
   }
