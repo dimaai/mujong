@@ -49,6 +49,8 @@ export function GameCanvas() {
     acceptDraw,
     rejectDraw,
     tickTimer,
+    mode,
+    localPlayerIndex,
   } = useGameStore();
 
   // ── All hooks MUST be declared before any conditional return ──
@@ -134,6 +136,12 @@ export function GameCanvas() {
   const { level, players, currentPlayerIndex, figures, walls, phase, winnerId, drawOfferFrom, playerTimers, againstView } = game;
   const currentPlayer = players[currentPlayerIndex];
   const hasTimer = level.timerMinutes > 0;
+
+  // Step 17: in a networked game we render BOTH players' panels but
+  // only the local player may interact. Compute the gate once and
+  // thread it through the click handlers + panel `isActive` props.
+  const isNetwork = mode === 'network' && localPlayerIndex !== null;
+  const isOpponentTurn = isNetwork && currentPlayerIndex !== localPlayerIndex;
   // ────────────────────────────────────────────────────────────
 
   /** is called when the user clicks an empty (or highlighted) cell.
@@ -147,6 +155,7 @@ export function GameCanvas() {
    * @param pos - the board position that was clicked
    */
   function handleCellClick(pos: Position) {
+    if (isOpponentTurn) return;
     if (!selectedInstanceId) return;
 
     // Check membership in O(1) using .some() on the pre-computed targets array.
@@ -188,6 +197,7 @@ export function GameCanvas() {
    * @param instanceId - the clicked figure's instance id
    */
   function handleFigureClick(instanceId: string) {
+    if (isOpponentTurn) return;
     if (selectedInstanceId === instanceId) {
       resetSelection(); // toggle off
     } else {
@@ -249,6 +259,27 @@ export function GameCanvas() {
         </div>
       )}
 
+      {/* Step 17: subtle hint while waiting for the remote player. */}
+      {isOpponentTurn && phase === 'playing' && (
+        <span
+          style={{
+            position: 'absolute',
+            top: 8,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            padding: '4px 10px',
+            borderRadius: 12,
+            background: 'rgba(0,0,0,0.55)',
+            color: '#fff',
+            fontSize: 12,
+            zIndex: 5,
+            pointerEvents: 'none',
+          }}
+        >
+          Opponent’s turn…
+        </span>
+      )}
+
       {/* ── Main vertical stack ────────────────────────────── */}
       <div className={styles.stack}>
         {/* Player 2 panel (top) — full width including timer bar areas */}
@@ -257,7 +288,7 @@ export function GameCanvas() {
           playerName={players[1].name}
           playerColor={PlayerColors[players[1].id]}
           figures={figures}
-          isActive={currentPlayerIndex === 1 && phase === 'playing'}
+          isActive={currentPlayerIndex === 1 && phase === 'playing' && !isOpponentTurn}
           isEnlarged={p2Enlarged}
           selectedInstanceId={selectedInstanceId}
           onSelectFigure={selectAvailableFigure}
@@ -391,7 +422,7 @@ export function GameCanvas() {
           playerName={players[0].name}
           playerColor={PlayerColors[players[0].id]}
           figures={figures}
-          isActive={currentPlayerIndex === 0 && phase === 'playing'}
+          isActive={currentPlayerIndex === 0 && phase === 'playing' && !isOpponentTurn}
           isEnlarged={p1Enlarged}
           selectedInstanceId={selectedInstanceId}
           onSelectFigure={selectAvailableFigure}

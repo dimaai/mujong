@@ -134,6 +134,34 @@ const DEFAULT_SKIN_MAP: Record<string, string> = {
 // ── Store shape ───────────────────────────────────────────────
 
 /**
+ * One entry per applied action — both local and remote — appended
+ * in the order the rules engine processed them. Step 17 only
+ * writes to it; Step 20's `getActionsSince(seq)` will read from
+ * it to satisfy `RESYNC_REQ`. `seq` is a per-store counter that
+ * advances in lockstep on both peers, so identical positions on
+ * each side end up with identical seqs.
+ */
+export interface ActionLogEntry {
+  seq: number;
+  turnNumber: number;
+  action: TurnAction;
+}
+
+/**
+ * Callback registered by the network layer to ship a locally-
+ * applied action over the DataChannel. Lives at module scope so
+ * `gameStore` does NOT import `netStore` (which would create a
+ * cycle: netStore already imports gameStore). Exactly one
+ * broadcaster is active at a time; clearing it (pass `null`) is
+ * the teardown contract used by `endNetworkSession()`.
+ */
+export type ActionBroadcaster = (entry: ActionLogEntry) => void;
+let actionBroadcaster: ActionBroadcaster | null = null;
+export function setActionBroadcaster(cb: ActionBroadcaster | null): void {
+  actionBroadcaster = cb;
+}
+
+/**
  * Everything the UI needs from the store, split into:
  *   - state   (data React reads)
  *   - actions (functions React calls to change state)
@@ -145,6 +173,23 @@ interface GameStore {
   selectedInstanceId: string | null;
   /** Highlighted squares showing where the selected figure CAN go. */
   validMoveTargets: Position[];
+  /**
+   * 'local'   — both players use this device (default; Phase A–F).
+   * 'network' — moves round-trip through the peer DataChannel and
+   *             only `localPlayerIndex` may interact (Step 17).
+   */
+  mode: 'local' | 'network';
+  /**
+   * Which `players[]` slot belongs to this device when `mode ===
+   * 'network'`. Null in local play.
+   */
+  localPlayerIndex: 0 | 1 | null;
+  /**
+   * Append-only log of every applied action, in order. Used by
+   * Step 20's resync; written here so we don't grow a second copy
+   * of `history` later.
+   */
+  actionLog: ActionLogEntry[];
 
   // Actions
   /**
@@ -162,7 +207,15 @@ interface GameStore {
    *
    * Side effects: replaces the current `game` with a fresh `GameState`.
    */
-  startGame: (args: { options: GameOptions; profiles: [Profile, Profile]; seed?: string }) => void;
+  startGame: (args: {
+    options: GameOptions;
+    profiles: [Profile, Profile];
+    seed?: string;
+    /** Defaults to 'local'. Pass 'network' from the netStore. */
+    mode?: 'local' | 'network';
+    /** Required when `mode === 'network'`; ignored otherwise. */
+    localPlayerIndex?: 0 | 1;
+  }) => void;
 
   /**
    * Selects a PLACED figure on the board and computes its legal moves.
@@ -181,9 +234,32 @@ interface GameStore {
   /**
    * Applies a validated PLACE or MOVE action to the game state.
    * Handles captures, win detection, and turn advancement.
-   * @param action - the action to execute
+   *
+   * Step 17 splits the entry point by `source`:
+   *   - 'local'  (default): the local user just clicked. In
+   *               network mode this requires it to be the local
+   *               player's turn; on success the action is also
+   *               broadcast over the DataChannel.
+   *   - 'remote': came in over the wire via `applyRemoteAction`
+   *               and was already validated. We never re-broadcast.
+   *
+   * The reducer body is unchanged — only the entry guard differs.
    */
-  executeAction: (action: TurnAction) => void;
+  executeAction: (
+    action: TurnAction,
+    opts?: { source?: 'local' | 'remote' },
+  ) => void;
+
+  /**
+   * Step 17: receive an ACTION from the peer. Validates that it
+   * matches the expected turn (a defensive double-check on top of
+   * the netStore's seq/sender validation) and dispatches through
+   * the same reducer path as a local move.
+   *
+   * @returns true when the action was applied; false on any
+   *          mismatch (logged by the caller).
+   */
+  applyRemoteAction: (entry: { action: TurnAction; turnNumber: number }) => boolean;
 
   /** Clears selection and valid-move highlights without changing game state. */
   resetSelection: () => void;
@@ -234,8 +310,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
   game: null,
   selectedInstanceId: null,
   validMoveTargets: [],
+  mode: 'local',
+  localPlayerIndex: null,
+  actionLog: [],
 
-  startGame: ({ options, profiles, seed }) => {
+  startGame: ({ options, profiles, seed, mode = 'local', localPlayerIndex }) => {
     // Resolve the named board-size preset to concrete dimensions.
     // Falls back to 'medium' if a stale id ever lands here so the
     // game still starts rather than crashing.
@@ -308,7 +387,16 @@ export const useGameStore = create<GameStore>((set, get) => ({
       walls,
     };
 
-    set({ game: newGame, selectedInstanceId: null, validMoveTargets: [] });
+    set({
+      game: newGame,
+      selectedInstanceId: null,
+      validMoveTargets: [],
+      mode,
+      // Only meaningful in network mode; explicit null in local play
+      // so a stale value from a previous networked match can't leak.
+      localPlayerIndex: mode === 'network' ? (localPlayerIndex ?? 0) : null,
+      actionLog: [],
+    });
   },
 
   selectFigure: (instanceId) => {
@@ -360,9 +448,27 @@ export const useGameStore = create<GameStore>((set, get) => ({
     set({ selectedInstanceId: instanceId, validMoveTargets: placements });
   },
 
-  executeAction: (action) => {
-    const { game } = get();
+  executeAction: (action, opts) => {
+    const source = opts?.source ?? 'local';
+    const { game, mode, localPlayerIndex, actionLog } = get();
     if (!game || game.phase !== 'playing') return;
+
+    // Network-mode guard: a local click during the opponent's turn
+    // must NOT mutate state — the UI also blocks it, but we double-
+    // gate here so a stray dispatch from a future codepath can't
+    // desync the boards.
+    if (
+      source === 'local' &&
+      mode === 'network' &&
+      localPlayerIndex !== null &&
+      game.currentPlayerIndex !== localPlayerIndex
+    ) {
+      return;
+    }
+
+    // Captured BEFORE the reducer runs so the broadcast carries
+    // the turnNumber the action represents (not the next one).
+    const turnNumberOfAction = game.turnNumber;
 
     const currentPlayer = game.players[game.currentPlayerIndex];
 
@@ -435,6 +541,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
     }
     // ──────────────────────────────────────────────────────────
 
+    const newEntry: ActionLogEntry = {
+      seq: actionLog.length,
+      turnNumber: turnNumberOfAction,
+      action,
+    };
+
     set({
       game: {
         ...game,
@@ -453,7 +565,34 @@ export const useGameStore = create<GameStore>((set, get) => ({
       },
       selectedInstanceId: null,
       validMoveTargets: [],
+      actionLog: [...actionLog, newEntry],
     });
+
+    // Step 17: ship local moves over the wire. Remote-source
+    // actions deliberately skip this branch — re-broadcasting
+    // would cause an infinite ping-pong.
+    if (source === 'local' && mode === 'network' && actionBroadcaster) {
+      try {
+        actionBroadcaster(newEntry);
+      } catch {
+        // Transport failures don't roll back the local state — the
+        // peer will request a resync via Step 20 once it reconnects.
+      }
+    }
+  },
+
+  applyRemoteAction: ({ action, turnNumber }) => {
+    const { game, mode, localPlayerIndex } = get();
+    if (!game || game.phase !== 'playing') return false;
+    if (mode !== 'network' || localPlayerIndex === null) return false;
+    // Defensive: must be the opponent's turn AND the turnNumber
+    // they claim must match ours. A mismatch means the boards have
+    // already drifted; Step 20 will recover via RESYNC_REQ.
+    if (game.currentPlayerIndex === localPlayerIndex) return false;
+    if (turnNumber !== game.turnNumber) return false;
+
+    get().executeAction(action, { source: 'remote' });
+    return true;
   },
 
   resetSelection: () => set({ selectedInstanceId: null, validMoveTargets: [] }),
@@ -521,7 +660,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
     return false;
   },
 
-  resetGame: () => set({ game: null, selectedInstanceId: null, validMoveTargets: [] }),
+  resetGame: () =>
+    set({
+      game: null,
+      selectedInstanceId: null,
+      validMoveTargets: [],
+      mode: 'local',
+      localPlayerIndex: null,
+      actionLog: [],
+    }),
 
   hydrateFromSnapshot: () => {
     const env = getEnvelope<GameState>(STORAGE_KEYS.gameSnapshot);

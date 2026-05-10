@@ -42,7 +42,7 @@ import {
   type Role,
   type SignalingClient,
 } from '../net/signaling';
-import { useGameStore } from './gameStore';
+import { useGameStore, setActionBroadcaster, type ActionLogEntry } from './gameStore';
 
 // ── Public state shape ────────────────────────────────────────
 
@@ -93,6 +93,12 @@ export interface NetState {
   gameStarted: boolean;
   /** Peer's profile, populated after their HELLO arrives. */
   peerProfile: Profile | null;
+  /**
+   * Peer's stable device id, captured from the HELLO envelope.
+   * Used by Step 17 to validate that ACTION messages actually
+   * come from the opponent we shook hands with.
+   */
+  peerDeviceId: string | null;
   /** Human-readable error text, valid only when status === 'error'. */
   error: string | null;
 
@@ -182,6 +188,13 @@ let currentClient: SignalingClient | null = null;
  * can detect gaps. Reset alongside the peer in `teardown()`.
  */
 let outgoingSeq = 1;
+/**
+ * Step 17: next inbound seq we expect from the peer. Initialised
+ * to 1 right after their HELLO (seq=0) lands. Bumped on each
+ * successfully validated message. A mismatch leaves a gap that
+ * Step 20 will close via RESYNC_REQ; for now we just log + drop.
+ */
+let expectedRemoteSeq = 1;
 /** Guards re-entrant `host()` / `join()` calls. */
 let inFlight = false;
 
@@ -264,12 +277,12 @@ export const useNetStore = create<NetState>((set, get) => {
     // states. The orchestrator below will reject too on failure,
     // but listening here as well lets us also catch a remote BYE
     // or a malformed message that the orchestrator wouldn't see.
-    const helloPromise = new Promise<Profile>((resolve, reject) => {
+    const helloPromise = new Promise<{ profile: Profile; senderId: string; seq: number }>((resolve, reject) => {
       const offMsg = peer.on('message', (msg) => {
         if (msg.type === 'HELLO') {
           offMsg();
           offState();
-          resolve(msg.profile);
+          resolve({ profile: msg.profile, senderId: msg.senderId, seq: msg.seq });
         }
       });
       const offState = peer.on('state', (s) => {
@@ -307,16 +320,38 @@ export const useNetStore = create<NetState>((set, get) => {
 
     set({ status: 'connecting' });
     await connectViaSignaling(peer, client, role, logger);
-    const peerProfile = await helloPromise;
-    set({ status: 'connected', peerProfile });
+    const hello = await helloPromise;
+    // Next message we expect from the peer comes right after their
+    // HELLO. Anything we receive with a seq < this is a duplicate;
+    // anything with a higher seq leaves a gap (Step 20).
+    expectedRemoteSeq = hello.seq + 1;
+    set({
+      status: 'connected',
+      peerProfile: hello.profile,
+      peerDeviceId: hello.senderId,
+    });
 
     // Long-lived listener for post-HELLO traffic. In Step 16 the
     // verbs we handle are `START` (game-start sync) and `BYE`
-    // (opponent left the lobby); Step 17 will add `ACTION` and
-    // friends here. We deliberately keep this subscription alive
-    // for the lifetime of the peer so it survives the
-    // `/network` → `/play` navigation.
+    // (opponent left the lobby); Step 17 adds `ACTION`. We
+    // deliberately keep this subscription alive for the lifetime
+    // of the peer so it survives the `/network` → `/play`
+    // navigation.
     peer.on('message', (msg) => {
+      // Reject messages that don't come from the peer we shook
+      // hands with. A spoofed senderId on the wire shouldn't be
+      // possible (the channel is end-to-end), but enforcing it
+      // here keeps the contract honest.
+      const expectedSender = get().peerDeviceId;
+      if (expectedSender && msg.senderId !== expectedSender) {
+        logger.log('warn', 'msg.sender', {
+          got: msg.senderId,
+          want: expectedSender,
+          type: msg.type,
+        });
+        return;
+      }
+
       if (msg.type === 'START') {
         // The clicker (sender) becomes player 1 (index 0). The
         // receiver picks the opposite slot. This lets either side
@@ -329,15 +364,59 @@ export const useNetStore = create<NetState>((set, get) => {
             options: msg.options,
             profiles: msg.profiles,
             seed: msg.seed,
+            mode: 'network',
+            localPlayerIndex,
           });
         } catch (err) {
           logger.log('error', 'start.apply', String(err));
           set({ status: 'error', error: 'Failed to start game.' });
           return;
         }
+        // Wire the gameStore → peer broadcaster now that the game
+        // exists. Done on both sides; teardown() clears it.
+        installActionBroadcaster();
+        // START is the next expected message after HELLO; bump
+        // the cursor so the first ACTION (seq+1) lines up.
+        if (msg.seq === expectedRemoteSeq) expectedRemoteSeq = msg.seq + 1;
         set({ localPlayerIndex, gameStarted: true });
         return;
       }
+
+      if (msg.type === 'ACTION') {
+        // Strict gap detection. A duplicate (seq < expected) is
+        // silently dropped; a forward gap is logged and dropped
+        // (Step 20 will request a resync). Both branches MUST NOT
+        // apply, otherwise the boards drift.
+        if (msg.seq < expectedRemoteSeq) {
+          logger.log('debug', 'action.dup', { seq: msg.seq });
+          return;
+        }
+        if (msg.seq > expectedRemoteSeq) {
+          logger.log('warn', 'action.gap', {
+            got: msg.seq,
+            want: expectedRemoteSeq,
+          });
+          return;
+        }
+        const applied = useGameStore.getState().applyRemoteAction({
+          action: msg.action,
+          turnNumber: msg.turnNumber,
+        });
+        if (applied) {
+          expectedRemoteSeq = msg.seq + 1;
+        } else {
+          // The action was well-formed on the wire but the local
+          // game state rejected it (wrong turnNumber, finished, …).
+          // Don't bump the cursor — a future RESYNC_RES will be
+          // able to retry from this seq.
+          logger.log('warn', 'action.reject', {
+            seq: msg.seq,
+            turnNumber: msg.turnNumber,
+          });
+        }
+        return;
+      }
+
       if (msg.type === 'BYE') {
         // Peer signalled a clean disconnect. If we haven't started
         // a game yet, fall back to the lobby's error state so the
@@ -352,6 +431,7 @@ export const useNetStore = create<NetState>((set, get) => {
             localPlayerIndex: null,
             gameStarted: false,
             peerProfile: null,
+            peerDeviceId: null,
             error: 'Opponent left the lobby.',
           });
         }
@@ -377,6 +457,7 @@ export const useNetStore = create<NetState>((set, get) => {
         localPlayerIndex: null,
         gameStarted: false,
         peerProfile: null,
+        peerDeviceId: null,
         error: 'Opponent disconnected.',
       });
     });
@@ -413,6 +494,9 @@ export const useNetStore = create<NetState>((set, get) => {
 
   /** Common cleanup; safe to call multiple times. */
   function teardown(): void {
+    // Clear the gameStore broadcaster first so any in-flight
+    // `executeAction` doesn't try to push to a closed channel.
+    setActionBroadcaster(null);
     try {
       currentPeer?.close();
     } catch {
@@ -426,7 +510,34 @@ export const useNetStore = create<NetState>((set, get) => {
     currentPeer = null;
     currentClient = null;
     outgoingSeq = 1;
+    expectedRemoteSeq = 1;
     inFlight = false;
+  }
+
+  /**
+   * Wire `gameStore` so every locally-applied action ships over
+   * the DataChannel. Called from both sides once a START has been
+   * applied (host: in `startNetworkGame`; joiner: in the START
+   * message handler). Cleared by `teardown()`.
+   *
+   * Side effects: registers a module-level callback on the game
+   * store; sends `ACTION` messages on the current peer.
+   */
+  function installActionBroadcaster(): void {
+    setActionBroadcaster((entry: ActionLogEntry) => {
+      if (!currentPeer) return;
+      const code = get().code ?? '';
+      currentPeer.send({
+        v: PROTOCOL_VERSION,
+        gameId: code,
+        senderId: getDeviceId(),
+        seq: outgoingSeq++,
+        t: Date.now(),
+        type: 'ACTION',
+        action: entry.action,
+        turnNumber: entry.turnNumber,
+      });
+    });
   }
 
   return {
@@ -437,6 +548,7 @@ export const useNetStore = create<NetState>((set, get) => {
     localPlayerIndex: null,
     gameStarted: false,
     peerProfile: null,
+    peerDeviceId: null,
     error: null,
     logs: [],
 
@@ -454,6 +566,7 @@ export const useNetStore = create<NetState>((set, get) => {
         localPlayerIndex: null,
         gameStarted: false,
         peerProfile: null,
+        peerDeviceId: null,
         error: null,
         logs: [],
       });
@@ -489,6 +602,7 @@ export const useNetStore = create<NetState>((set, get) => {
         localPlayerIndex: null,
         gameStarted: false,
         peerProfile: null,
+        peerDeviceId: null,
         error: null,
         logs: [],
       });
@@ -545,6 +659,7 @@ export const useNetStore = create<NetState>((set, get) => {
         localPlayerIndex: null,
         gameStarted: false,
         peerProfile: null,
+        peerDeviceId: null,
         error: wasError ? get().error : null,
       });
       // After a deliberate leave we always clear the error too;
@@ -597,11 +712,21 @@ export const useNetStore = create<NetState>((set, get) => {
       }
 
       try {
-        useGameStore.getState().startGame({ options, profiles, seed });
+        useGameStore.getState().startGame({
+          options,
+          profiles,
+          seed,
+          mode: 'network',
+          localPlayerIndex: 0,
+        });
       } catch (err) {
         set({ status: 'error', error: `Failed to start: ${String(err)}` });
         return false;
       }
+
+      // Wire the gameStore → peer broadcaster so subsequent local
+      // moves auto-ship over the DataChannel.
+      installActionBroadcaster();
 
       set({ localPlayerIndex: 0, gameStarted: true });
       return true;
@@ -617,6 +742,7 @@ export const useNetStore = create<NetState>((set, get) => {
         localPlayerIndex: null,
         gameStarted: false,
         peerProfile: null,
+        peerDeviceId: null,
         error: null,
       });
     },
