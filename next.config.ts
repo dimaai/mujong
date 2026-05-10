@@ -26,10 +26,19 @@ const nextConfig: NextConfig = {
 // PWA wrapper — generates a Workbox-based service worker into `public/` at
 // build time so the static export can be installed and used offline.
 // Disabled in development so the dev server's HMR isn't fighting the SW cache.
+//
+// `dynamicStartUrl: false` skips next-pwa's auto-generated NetworkFirst
+// route for `/`. That route's `cacheWillUpdate` handler is emitted with
+// SWC TypeScript helpers (`_async_to_generator`, `_ts_generator`) that
+// are not bundled into the service worker, causing a runtime
+// ReferenceError on every response — which silently broke fetch
+// interception (including signaling API calls). The static export
+// already precaches `index.html`, so we don't lose offline coverage.
 const withPWA = withPWAInit({
   dest: 'public',
   register: true,
   disable: process.env.NODE_ENV === 'development',
+  dynamicStartUrl: false,
   workboxOptions: {
     skipWaiting: true,
     clientsClaim: true,
