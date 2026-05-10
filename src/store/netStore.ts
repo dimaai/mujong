@@ -29,7 +29,12 @@ import { create } from 'zustand';
 import { getDeviceId } from '../persistence/ids';
 import { createNetLogger, type LogEntry } from '../net/log';
 import { fetchIceServers } from '../net/iceServers';
-import { connectViaSignaling, createPeer, type Peer } from '../net/peer';
+import {
+  connectViaSignaling,
+  createPeer,
+  sendPing,
+  type Peer,
+} from '../net/peer';
 import {
   PROTOCOL_VERSION,
   type GameOptions,
@@ -63,6 +68,46 @@ export type NetStatus =
   | 'connecting'
   | 'connected'
   | 'error';
+
+/**
+ * Connection-quality tier surfaced to the UI. Driven by the
+ * sliding mean of the last `RTT_WINDOW_SIZE` PONG round-trips,
+ * with overrides when no PONG has arrived for a while.
+ *   good     — mean RTT < 150 ms; healthy.
+ *   slow     — mean RTT < 400 ms; playable but noticeable lag.
+ *   unstable — mean RTT ≥ 400 ms, or 15 s without a PONG.
+ */
+export type NetQuality = 'good' | 'slow' | 'unstable';
+
+/** Number of recent RTT samples mixed into the quality mean. */
+export const RTT_WINDOW_SIZE = 5;
+
+/**
+ * Pure helper used by the heartbeat loop AND by tests. Kept
+ * outside the store so it has no React/Zustand coupling.
+ *
+ * Inputs : `rtts` — recent PONG round-trip samples in ms,
+ *                   most-recent-last. May be empty.
+ *          `now`, `lastSeenAt` — wall-clock and last successful
+ *                   inbound timestamps. When the gap exceeds
+ *                   15 s the result is forced to `'unstable'`
+ *                   regardless of any cached RTTs.
+ * Output : a `NetQuality` tier, or `null` if there is nothing to
+ *          report yet (no samples AND no observed traffic).
+ * Side fx: none.
+ */
+export function computeQuality(
+  rtts: readonly number[],
+  now: number,
+  lastSeenAt: number | null,
+): NetQuality | null {
+  if (lastSeenAt != null && now - lastSeenAt >= 15_000) return 'unstable';
+  if (rtts.length === 0) return lastSeenAt == null ? null : 'good';
+  const mean = rtts.reduce((a, b) => a + b, 0) / rtts.length;
+  if (mean < 150) return 'good';
+  if (mean < 400) return 'slow';
+  return 'unstable';
+}
 
 /** Strings the UI shows under the spinner. */
 export interface NetState {
@@ -101,6 +146,25 @@ export interface NetState {
   peerDeviceId: string | null;
   /** Human-readable error text, valid only when status === 'error'. */
   error: string | null;
+
+  /**
+   * Connection-quality tier driven by the heartbeat loop. `null`
+   * until the first PONG (or the first time we fall into the
+   * 15 s-without-traffic branch). Cleared by `leave()`/teardown.
+   */
+  quality: NetQuality | null;
+  /**
+   * Mean of the last `RTT_WINDOW_SIZE` PONG round-trips, in ms.
+   * `null` until the first PONG arrives. Used for the pill tooltip
+   * and for future analytics.
+   */
+  lastRttMs: number | null;
+  /**
+   * Wall-clock (ms since epoch) of the most recent successfully
+   * decoded inbound message. Drives the "X seconds since last
+   * heartbeat" check that flips `quality` to `'unstable'`.
+   */
+  lastSeenAt: number | null;
 
   /**
    * Recent diagnostic log entries from the net layer (peer +
@@ -197,6 +261,26 @@ let outgoingSeq = 1;
 let expectedRemoteSeq = 1;
 /** Guards re-entrant `host()` / `join()` calls. */
 let inFlight = false;
+
+// ── Heartbeat refs (Step 18) ──────────────────────────────────
+//
+// All three live at module scope so `teardown()` can null them
+// out without help from a React effect. The interval is started
+// once we reach `'connected'` and cleared on any teardown path
+// (leave, BYE handler, peer-state failure, beforeunload).
+
+/** Live `setInterval` handle for the PING loop; null when idle. */
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+/** Sliding window of recent PONG RTTs (ms), oldest-first. */
+const rttWindow: number[] = [];
+/**
+ * Flag set on first reach of `>= 30 s` without a PONG so we don't
+ * spam the reconnect signal every tick. Step 19 will read this
+ * via a subscription; Step 18 just logs.
+ */
+let reconnectSignalled = false;
+/** Optional `beforeunload` cleanup. Null when no peer is alive. */
+let beforeUnloadHandler: (() => void) | null = null;
 
 // ── Store ─────────────────────────────────────────────────────
 
@@ -330,13 +414,16 @@ export const useNetStore = create<NetState>((set, get) => {
       peerProfile: hello.profile,
       peerDeviceId: hello.senderId,
     });
+    // Start the heartbeat as soon as we're confirmed connected.
+    // It will tick every 5 s and update `quality` / `lastRttMs`.
+    startHeartbeat(logger);
 
     // Long-lived listener for post-HELLO traffic. In Step 16 the
     // verbs we handle are `START` (game-start sync) and `BYE`
-    // (opponent left the lobby); Step 17 adds `ACTION`. We
-    // deliberately keep this subscription alive for the lifetime
-    // of the peer so it survives the `/network` → `/play`
-    // navigation.
+    // (opponent left the lobby); Step 17 adds `ACTION`; Step 18
+    // adds `PING`/`PONG`. We deliberately keep this subscription
+    // alive for the lifetime of the peer so it survives the
+    // `/network` → `/play` navigation.
     peer.on('message', (msg) => {
       // Reject messages that don't come from the peer we shook
       // hands with. A spoofed senderId on the wire shouldn't be
@@ -349,6 +436,40 @@ export const useNetStore = create<NetState>((set, get) => {
           want: expectedSender,
           type: msg.type,
         });
+        return;
+      }
+
+      // Any well-formed inbound message from the peer counts as
+      // "we heard from them" — it keeps the 15 s staleness timer
+      // happy even when ACTIONs are flowing without PINGs.
+      set({ lastSeenAt: Date.now() });
+
+      if (msg.type === 'PING') {
+        // Auto-reply. We don't track outgoing PONG seq separately
+        // — it uses the same `outgoingSeq` cursor as everything
+        // else so the peer can detect gaps uniformly.
+        try {
+          currentPeer?.send({
+            v: PROTOCOL_VERSION,
+            gameId: get().code ?? '',
+            senderId: getDeviceId(),
+            seq: outgoingSeq++,
+            t: Date.now(),
+            type: 'PONG',
+            replyTo: msg.seq,
+          });
+        } catch (err) {
+          logger.log('debug', 'pong.send', String(err));
+        }
+        if (msg.seq === expectedRemoteSeq) expectedRemoteSeq = msg.seq + 1;
+        return;
+      }
+
+      if (msg.type === 'PONG') {
+        // `sendPing`'s own promise listener computes the RTT and
+        // updates the store; here we just keep the seq cursor in
+        // step so the next ACTION doesn't look like a gap.
+        if (msg.seq === expectedRemoteSeq) expectedRemoteSeq = msg.seq + 1;
         return;
       }
 
@@ -418,6 +539,9 @@ export const useNetStore = create<NetState>((set, get) => {
       }
 
       if (msg.type === 'BYE') {
+        // Keep the cursor moving so any in-flight gap detection
+        // logic stays in sync if more messages arrive.
+        if (msg.seq === expectedRemoteSeq) expectedRemoteSeq = msg.seq + 1;
         // Peer signalled a clean disconnect. If we haven't started
         // a game yet, fall back to the lobby's error state so the
         // user can retry. (Step 19 will handle in-game BYE.)
@@ -432,6 +556,9 @@ export const useNetStore = create<NetState>((set, get) => {
             gameStarted: false,
             peerProfile: null,
             peerDeviceId: null,
+            quality: null,
+            lastRttMs: null,
+            lastSeenAt: null,
             error: 'Opponent left the lobby.',
           });
         }
@@ -458,6 +585,9 @@ export const useNetStore = create<NetState>((set, get) => {
         gameStarted: false,
         peerProfile: null,
         peerDeviceId: null,
+        quality: null,
+        lastRttMs: null,
+        lastSeenAt: null,
         error: 'Opponent disconnected.',
       });
     });
@@ -494,6 +624,9 @@ export const useNetStore = create<NetState>((set, get) => {
 
   /** Common cleanup; safe to call multiple times. */
   function teardown(): void {
+    // Stop heartbeat FIRST so its timer can't push to a closing
+    // channel and surface as a noisy `peer.send` exception.
+    stopHeartbeat();
     // Clear the gameStore broadcaster first so any in-flight
     // `executeAction` doesn't try to push to a closed channel.
     setActionBroadcaster(null);
@@ -540,6 +673,108 @@ export const useNetStore = create<NetState>((set, get) => {
     });
   }
 
+  /**
+   * Step 18: start the 5 s PING loop. Idempotent — calling twice
+   * does NOT double the timer. Stops automatically on any
+   * teardown via `stopHeartbeat()`.
+   *
+   * Inputs : `logger` — net logger used to record stale-peer
+   *                     transitions (the UI also reads `quality`).
+   * Outputs: none.
+   * Side fx: schedules an interval that `peer.send`s `PING`s and
+   *          updates `quality` / `lastRttMs` / `lastSeenAt`.
+   */
+  function startHeartbeat(logger: {
+    log: (level: 'debug' | 'info' | 'warn' | 'error', tag: string, data?: unknown) => void;
+  }): void {
+    if (heartbeatTimer) return;
+    // Seed `lastSeenAt` to "now" so the 15 s timer doesn't trip
+    // before the very first PONG can possibly arrive.
+    set({ lastSeenAt: Date.now(), quality: 'good', lastRttMs: null });
+    rttWindow.length = 0;
+    reconnectSignalled = false;
+
+    const tick = (): void => {
+      const peer = currentPeer;
+      if (!peer || peer.state !== 'open') return;
+      const seq = outgoingSeq++;
+      const sentAt = Date.now();
+      sendPing(peer, {
+        v: PROTOCOL_VERSION,
+        gameId: get().code ?? '',
+        senderId: getDeviceId(),
+        seq,
+        t: sentAt,
+        type: 'PING',
+      })
+        .then((rtt) => {
+          rttWindow.push(rtt);
+          if (rttWindow.length > RTT_WINDOW_SIZE) rttWindow.shift();
+          const mean = Math.round(
+            rttWindow.reduce((a, b) => a + b, 0) / rttWindow.length,
+          );
+          const now = Date.now();
+          set({
+            lastRttMs: mean,
+            lastSeenAt: now,
+            quality: computeQuality(rttWindow, now, now),
+          });
+          reconnectSignalled = false;
+        })
+        .catch((err: unknown) => {
+          // Timeout / peer down. Don't crash the loop — let the
+          // staleness check below promote `quality` to `'unstable'`.
+          logger.log('debug', 'ping.fail', String(err));
+        })
+        .finally(() => {
+          // Independent of PONG: if we haven't heard ANYTHING in
+          // a while, demote quality and (after 30 s) signal that
+          // Step 19's reconnect should kick in.
+          const now = Date.now();
+          const lastSeenAt = get().lastSeenAt;
+          const q = computeQuality(rttWindow, now, lastSeenAt);
+          if (q !== null) set({ quality: q });
+          if (
+            lastSeenAt != null &&
+            now - lastSeenAt >= 30_000 &&
+            !reconnectSignalled
+          ) {
+            reconnectSignalled = true;
+            // Step 19 will hook this; for now just log so QA can
+            // see the threshold fired in the debug overlay.
+            logger.log('warn', 'heartbeat.stale', {
+              sinceSeenMs: now - lastSeenAt,
+            });
+          }
+        });
+    };
+
+    heartbeatTimer = setInterval(tick, 5_000);
+
+    // Belt-and-braces cleanup if the user navigates away or
+    // closes the tab while the peer is alive.
+    if (typeof window !== 'undefined' && !beforeUnloadHandler) {
+      beforeUnloadHandler = () => {
+        stopHeartbeat();
+      };
+      window.addEventListener('beforeunload', beforeUnloadHandler);
+    }
+  }
+
+  /** Stop the PING loop and remove the `beforeunload` listener. */
+  function stopHeartbeat(): void {
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+    if (typeof window !== 'undefined' && beforeUnloadHandler) {
+      window.removeEventListener('beforeunload', beforeUnloadHandler);
+      beforeUnloadHandler = null;
+    }
+    rttWindow.length = 0;
+    reconnectSignalled = false;
+  }
+
   return {
     status: 'idle',
     code: null,
@@ -550,6 +785,9 @@ export const useNetStore = create<NetState>((set, get) => {
     peerProfile: null,
     peerDeviceId: null,
     error: null,
+    quality: null,
+    lastRttMs: null,
+    lastSeenAt: null,
     logs: [],
 
     async host(selfProfile) {
@@ -567,6 +805,9 @@ export const useNetStore = create<NetState>((set, get) => {
         gameStarted: false,
         peerProfile: null,
         peerDeviceId: null,
+        quality: null,
+        lastRttMs: null,
+        lastSeenAt: null,
         error: null,
         logs: [],
       });
@@ -603,6 +844,9 @@ export const useNetStore = create<NetState>((set, get) => {
         gameStarted: false,
         peerProfile: null,
         peerDeviceId: null,
+        quality: null,
+        lastRttMs: null,
+        lastSeenAt: null,
         error: null,
         logs: [],
       });
@@ -660,6 +904,9 @@ export const useNetStore = create<NetState>((set, get) => {
         gameStarted: false,
         peerProfile: null,
         peerDeviceId: null,
+        quality: null,
+        lastRttMs: null,
+        lastSeenAt: null,
         error: wasError ? get().error : null,
       });
       // After a deliberate leave we always clear the error too;
@@ -743,6 +990,9 @@ export const useNetStore = create<NetState>((set, get) => {
         gameStarted: false,
         peerProfile: null,
         peerDeviceId: null,
+        quality: null,
+        lastRttMs: null,
+        lastSeenAt: null,
         error: null,
       });
     },

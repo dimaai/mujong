@@ -19,6 +19,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useGameStore } from '../../store/gameStore';
+import { useNetStore } from '../../store/netStore';
 import { Board } from '../Board/Board';
 import { PlayerPanel } from '../PlayerPanel/PlayerPanel';
 import type { Position, TurnAction } from '../../domain/types';
@@ -61,6 +62,13 @@ export function GameCanvas() {
   const [cellSize, setCellSize] = useState(64);
   const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Step 18: connection-quality pill. We subscribe per-field so a
+  // store update on, say, `peerProfile` doesn't repaint the pill.
+  // Subscribed here (BEFORE the early-return below) to keep the
+  // hook order stable across renders.
+  const netQuality = useNetStore((s) => s.quality);
+  const netLastRtt = useNetStore((s) => s.lastRttMs);
 
   // ── Responsive cell size ──────────────────────────────────
   useEffect(() => {
@@ -277,6 +285,45 @@ export function GameCanvas() {
           }}
         >
           Opponent’s turn…
+        </span>
+      )}
+
+      {/* Step 18: connection-quality pill (network mode only). */}
+      {isNetwork && netQuality && (
+        <span
+          aria-label={`Connection: ${netQuality}${netLastRtt != null ? `, ${netLastRtt} ms` : ''}`}
+          title={netLastRtt != null ? `${netLastRtt} ms` : 'no samples yet'}
+          style={{
+            position: 'absolute',
+            top: 8,
+            right: 8,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '4px 8px',
+            borderRadius: 999,
+            background: 'rgba(0,0,0,0.55)',
+            color: '#fff',
+            fontSize: 11,
+            zIndex: 5,
+            pointerEvents: 'none',
+          }}
+        >
+          <span
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background:
+                netQuality === 'good'
+                  ? '#3ad26b'
+                  : netQuality === 'slow'
+                    ? '#e6b020'
+                    : '#e0494a',
+              boxShadow: '0 0 4px rgba(0,0,0,0.4)',
+            }}
+          />
+          {netLastRtt != null ? `${netLastRtt} ms` : netQuality}
         </span>
       )}
 

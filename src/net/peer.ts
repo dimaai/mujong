@@ -568,3 +568,61 @@ export async function connectViaSignaling(
     onState();
   }
 }
+
+// -- sendPing --------------------------------------------------
+
+/**
+ * Send a `PING` over `peer` and resolve with the round-trip time
+ * in milliseconds once the matching `PONG` arrives.
+ *
+ * Inputs : `peer`      — open `Peer` to use as transport.
+ *          `ping`      — fully stamped PING envelope. The caller
+ *                        owns the `seq` cursor, so we don't touch
+ *                        it here; `ping.t` is used as the send
+ *                        timestamp when measuring RTT.
+ *          `timeoutMs` — reject after this long without a PONG.
+ *                        Defaults to 10 s, comfortably above the
+ *                        heartbeat interval.
+ * Output : `Promise<number>` — measured RTT in ms.
+ * Side fx: writes one message to the peer; subscribes to peer
+ *          events for the duration of the wait and unsubscribes
+ *          on resolve / reject. Does NOT close the peer on
+ *          timeout — caller decides whether a missed PONG is
+ *          fatal or just a quality dip.
+ */
+export function sendPing(
+  peer: Peer,
+  ping: NetMessage & { type: 'PING' },
+  timeoutMs = 10_000,
+): Promise<number> {
+  const sentAt = ping.t;
+  return new Promise<number>((resolve, reject) => {
+    let done = false;
+    const finish = (fn: () => void): void => {
+      if (done) return;
+      done = true;
+      offMsg();
+      offState();
+      clearTimeout(timer);
+      fn();
+    };
+    const offMsg = peer.on('message', (msg) => {
+      if (msg.type === 'PONG' && msg.replyTo === ping.seq) {
+        finish(() => resolve(Date.now() - sentAt));
+      }
+    });
+    const offState = peer.on('state', (s) => {
+      if (s === 'closed' || s === 'failed') {
+        finish(() => reject(new Error(`peer ${s} before PONG`)));
+      }
+    });
+    const timer = setTimeout(() => {
+      finish(() => reject(new Error('ping timeout')));
+    }, timeoutMs);
+    try {
+      peer.send(ping);
+    } catch (err) {
+      finish(() => reject(err as Error));
+    }
+  });
+}
