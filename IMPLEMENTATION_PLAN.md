@@ -320,6 +320,53 @@ Companion to [ARCHITECTURE.md](ARCHITECTURE.md). Work is sliced into small, inde
    - Manual forfeit ("Resign" button on the overlay too) sends `BYE { reason: 'forfeit' }` and ends the game with the opponent as winner.
 4. **STOP condition:** With two tabs mid-game, closing tab B for 10 s then reopening it auto-reconnects without user action; closing for 60+ s lets tab A claim a win and returns both to MainMenu cleanly. No orphan `RTCPeerConnection` instances after the flow (verified via `chrome://webrtc-internals`).
 
+#### Step 19 — actually shipped (commit `19d3252`, scoped down)
+What landed deviates from the plan above. Capturing the delta so a future contributor knows what's already in `main` and what's deferred:
+
+- **Shipped (scoped Step 19):**
+  - `connectionLost: boolean` + `connectionLostAt: number | null` on [src/store/netStore.ts](src/store/netStore.ts).
+  - The `peer.on('state')` handler no longer instantly forfeits on `'closed'` / `'failed'` mid-game — it sets `connectionLost = true` and leaves the user in control.
+  - Two new netStore actions: `claimWin()` (local wins, sends `BYE { reason: 'timeout' }`) and `resign()` (local loses, sends `BYE { reason: 'forfeit' }`). They use a module-level `pendingByeReason: ByeReason | null` so the existing phase-change subscriber emits the right BYE verb instead of the default `'normal'`.
+  - Inbound BYE handler now branches on `reason`: `'timeout'` from the peer means *we* lose (peer claim-won us); everything else still treats it as the peer leaving and we win via `handleRemoteAbort`.
+  - New presentational [src/components/Network/ReconnectOverlay.tsx](src/components/Network/ReconnectOverlay.tsx) — 60 s countdown, "Claim win" disabled until 0, "Resign" always available. Mounted in [src/components/GameCanvas/GameCanvas.tsx](src/components/GameCanvas/GameCanvas.tsx) when `isNetwork && connectionLost && phase === 'playing' && connectionLostAt != null`.
+  - `STORAGE_KEYS.netSession = "mojong.netSession.v1"` registered in [src/persistence/keys.ts](src/persistence/keys.ts) but **not yet read or written**. Reserved for Step 19.5.
+  - Fix shipped in `ba09e30`: [src/store/gameStore.ts](src/store/gameStore.ts) `flushSnapshot()` now skips writes when `mode === 'network'`, and `startGame()` deletes any leftover snapshot when entering network mode. This was a follow-up after closing P1's tab caused the game to be resumed as a *local* game on reload (because the Step 10 snapshot doesn't persist `mode` / `localPlayerIndex`).
+
+- **Deferred to Step 19.5 (see below):**
+  - `attemptReconnect()` — re-running the signaling handshake on a tab reload or peer-state recovery.
+  - `STORAGE_KEYS.netSession` actually being written on connect / cleared on game end.
+  - Auto-reconnect within the 60 s grace window (currently the overlay just waits — there is no recovery path; the user must Claim Win or Resign once the timer ends).
+
+### Step 19.5 — Auto-reconnect (signaling re-attach + session persistence)
+1. **Step name:** Make a reloaded or briefly-disconnected peer rejoin its existing session without user intervention.
+2. **Files involved:**
+   - [src/store/netStore.ts](src/store/netStore.ts) *(touch)* — write the netSession envelope on every successful `host()` / `join()`; clear it from `endNetworkSession()` and `teardown()`. Add `attemptReconnect()` that:
+     1. reads the envelope,
+     2. checks the server (via signaling) that the session still exists and we still hold a valid token,
+     3. re-creates `currentPeer`, runs `connectViaSignaling(peer, client, role, …)` with our existing token, and
+     4. on success sends a single `HELLO` (so `expectedRemoteSeq` resets cleanly), then a `RESYNC_REQ` (Step 20 consumes it).
+   - [src/net/signaling.ts](src/net/signaling.ts) *(touch)* — extend the typed client with `reattach(code, role, token)` that returns the existing session metadata (peer's most-recent SDP, drained ICE candidates, current `expectedRemoteSeq` if we choose to track it server-side). The current client only handles initial create/join — it has no read-after-handshake mode.
+   - [api/src/functions/exchangeSdp.ts](api/src/functions/exchangeSdp.ts), [api/src/functions/exchangeIce.ts](api/src/functions/exchangeIce.ts), [api/src/sessions/store.ts](api/src/sessions/store.ts) *(touch)* — must permit a second SDP exchange under the same token (today they assume single-use). Add a `renegotiationCount: number` on the session row so server-side TTL extension can be bounded (e.g. max 3 reconnects per session).
+   - [api/src/sessions/__tests__/store.test.ts](api/src/sessions/__tests__/store.test.ts) *(touch)* + new `tableStore.reattach.test.ts`.
+   - [src/components/Network/ReconnectOverlay.tsx](src/components/Network/ReconnectOverlay.tsx) *(touch)* — surface "Reconnecting…" state when an `attemptReconnect()` is in flight; on success the overlay hides itself.
+   - [src/store/netStore.ts](src/store/netStore.ts) *(touch)* — call `attemptReconnect()` automatically on (a) module init if `STORAGE_KEYS.netSession` exists and `gameStarted` is implied by the snapshot, and (b) every 5 s while `connectionLost === true`, until the grace timer expires.
+3. **What will be implemented:**
+   - **Persistence record shape:** `{ code: string; role: 'host' | 'join'; ownToken: string; gameId: string; localPlayerIndex: 0 | 1; savedAt: number }`. Stored under the existing `STORAGE_KEYS.netSession` key using the same `Persisted<T>` envelope as everything else.
+   - **Signaling re-attach contract:** `POST /api/sessions/{code}/reattach` with `Authorization: Bearer <ownToken>` returns `{ peerSdp, peerIce: [], peerSenderId, sessionAgeMs }` or `404`/`410` if the session is gone or expired. The server stores the *latest* peer SDP/ICE rather than draining on read so a re-attaching client can pick them up.
+   - **Why a separate endpoint?** Today's `joinSession` is single-use (sets `joinerToken`). A second call on the same code would conflict. `reattach` is idempotent and token-gated: only the holder of the token issued at create/join time can re-fetch.
+   - **Client-side flow:**
+     1. App boot ([src/app/play/page.tsx](src/app/play/page.tsx) or a top-level effect): if `STORAGE_KEYS.netSession` is present AND a network-mode `GameState` snapshot is also present (we'll need to *do* persist network snapshots — see "open question" below), restore both stores and call `attemptReconnect()`.
+     2. Mid-game disconnect: the existing `peer.on('state')` handler that flips `connectionLost = true` also kicks off the periodic `attemptReconnect()` loop.
+     3. On reconnect success: send `HELLO` to confirm identity, then `RESYNC_REQ { fromSeq: expectedRemoteSeq }`. Consume the `RESYNC_RES` in Step 20.
+   - **State-machine cleanup:** the existing `connectionLost` / `connectionLostAt` fields stay; add `reconnecting: boolean` so the overlay can show "Reconnecting…" instead of "Waiting…". On reconnect success: clear all three and resume the heartbeat.
+   - **Open question — should we persist the network `GameState` snapshot?** The fix in `ba09e30` deliberately blocks this because today there's no recovery path. Step 19.5 needs to either (a) lift that block once auto-reconnect is in place, or (b) keep the snapshot blocked and rely on Step 20's `RESYNC_RES` to rebuild the in-memory game from the server-stored peer state (much harder — the server doesn't store game actions, only signaling). Decision: **persist the network snapshot under a separate `STORAGE_KEYS.netGameSnapshot` key** so the local-game snapshot path stays untouched. Only the network snapshot is restored when `attemptReconnect()` succeeds; if reconnect fails, the snapshot is dropped along with the netSession record.
+4. **STOP condition:**
+   - Two tabs in a network game; close tab B → tab A's overlay shows "Reconnecting…" → reopen `localhost:3000` in tab B → tab B auto-rejoins, both screens converge to the same state via Step 20's resync, and the overlay disappears.
+   - Tab B reload (Cmd-R / Ctrl-R) without closing: same auto-reconnect path; tab A may not even notice the blip.
+   - With tab B closed beyond the 10-min server TTL, the `reattach` call returns 410, the persistence record is cleared, and the user lands on MainMenu cleanly with no Resume option.
+   - Unit tests: `signaling.reattach.test.ts` covers token-gated success, wrong-token 401, unknown-code 404, expired-session 410.
+   - No orphan `RTCPeerConnection` instances after a successful reconnect (verified via `chrome://webrtc-internals`).
+
 ### Step 20 — `RESYNC_REQ` / `RESYNC_RES` to recover missed actions
 1. **Step name:** A reconnected peer catches up via the action log instead of resyncing the whole `GameState`.
 2. **Files involved:**
@@ -331,6 +378,8 @@ Companion to [ARCHITECTURE.md](ARCHITECTURE.md). Work is sliced into small, inde
    - Sender replies with the slice of its `actionLog` from `fromSeq` onwards. Empty slice = "you're caught up".
    - The receiver applies the slice in order through the same `applyRemoteAction` path; the validator now tolerates a contiguous batch.
    - Bound the log: trim entries older than the last 200 turns to keep memory flat (a real game is far shorter; this is just paranoia).
+   - **Note on existing wiring:** `RESYNC_REQ` and `RESYNC_RES` are already in the `NetMessage` union from Step 11 and round-trip in [src/net/__tests__/protocol.test.ts](src/net/__tests__/protocol.test.ts). The current netStore message handler does **not** have a case for them — it falls through to no-op. Step 20 just adds the two `if (msg.type === 'RESYNC_REQ' …)` branches and the `getActionsSince` exporter; no protocol changes.
+   - **Coupling to Step 19.5:** Step 20 is independently useful (handles seq gaps caused by transient drops within an open channel) but only delivers full disconnect-recovery when Step 19.5's auto-reconnect fires the `RESYNC_REQ` immediately after re-establishing the channel. Land 19.5 first, then 20 against it.
 4. **STOP condition:** Programmatically dropping every other outgoing `ACTION` from tab A for 5 s (toggleable dev-only switch in the ring-buffer logger UI, optional) results in tab B catching up automatically once the drop stops. Unit test green; no regressions in Step 17's lockstep test.
 
 ---
