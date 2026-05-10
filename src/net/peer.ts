@@ -172,12 +172,33 @@ export function createPeer(options: CreatePeerOptions): Peer {
   };
 
   const factory = rtcFactory ?? ((cfg) => new RTCPeerConnection(cfg));
-  // Default to a public STUN server when no rtcConfig is provided.
-  // Without any iceServers, some browsers won't even gather host
-  // candidates for cross-tab connections; a STUN entry guarantees
-  // candidate generation. Caller can override or pass `{}` to opt out.
+  // Default ICE configuration:
+  //   - Multiple public STUN servers for redundancy.
+  //   - Open Relay Project's free public TURN servers as a
+  //     fallback for symmetric-NAT networks (corporate Wi-Fi,
+  //     mobile CGNAT) where STUN alone can't traverse.
+  // Caller can override entirely or pass `{}` to opt out.
   const effectiveConfig: RTCConfiguration = rtcConfig ?? {
-    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun.cloudflare.com:3478' },
+      {
+        urls: 'turn:openrelay.metered.ca:80',
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443',
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+    ],
   };
   const pc = factory(effectiveConfig);
 
@@ -277,7 +298,28 @@ export function createPeer(options: CreatePeerOptions): Peer {
   };
   pc.onconnectionstatechange = reflectConnectionState;
   pc.oniceconnectionstatechange = () => {
+    logger?.log('debug', 'peer', {
+      role,
+      iceConnectionState: pc.iceConnectionState,
+    });
     if (pc.iceConnectionState === 'failed') setState('failed');
+  };
+  pc.onicegatheringstatechange = () => {
+    logger?.log('debug', 'peer', {
+      role,
+      iceGatheringState: pc.iceGatheringState,
+    });
+  };
+  pc.onicecandidateerror = (ev: Event) => {
+    // Cast: lib.dom types this as Event in older lib versions.
+    const e = ev as RTCPeerConnectionIceErrorEvent;
+    logger?.log('warn', 'peer', {
+      role,
+      msg: 'ice candidate error',
+      url: e.url,
+      errorCode: e.errorCode,
+      errorText: e.errorText,
+    });
   };
 
   // ── Public methods ──────────────────────────────────────────
