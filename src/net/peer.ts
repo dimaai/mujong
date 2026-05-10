@@ -277,7 +277,28 @@ export function createPeer(options: CreatePeerOptions): Peer {
   pc.onicecandidate = (ev) => {
     // `null` candidate marks end-of-candidates and is forwarded
     // verbatim so the signaling layer can stop polling.
-    emit('ice', ev.candidate ? ev.candidate.toJSON() : null);
+    if (ev.candidate) {
+      // Log candidate type (host/srflx/prflx/relay) so we can tell
+      // from the on-device debug overlay whether TURN actually
+      // produced a relay candidate. A failed connect with zero
+      // relay candidates almost always means the TURN server is
+      // broken or unreachable (e.g. retired public service).
+      const c = ev.candidate;
+      const m = /typ (\w+)/.exec(c.candidate);
+      logger?.log('debug', 'peer', {
+        role,
+        ice: 'local',
+        type: m?.[1] ?? 'unknown',
+        protocol: c.protocol,
+        address: c.address,
+        port: c.port,
+        url: (c as RTCIceCandidate & { url?: string }).url,
+      });
+      emit('ice', c.toJSON());
+    } else {
+      logger?.log('debug', 'peer', { role, ice: 'local', type: 'end-of-candidates' });
+      emit('ice', null);
+    }
   };
 
   // Both `connectionState` and `iceConnectionState` can move us
@@ -368,6 +389,17 @@ export function createPeer(options: CreatePeerOptions): Peer {
   };
 
   const addIceCandidate = async (c: RTCIceCandidateInit): Promise<void> => {
+    // Log remote candidate types alongside the local ones so the
+    // debug overlay shows the full picture of what each side
+    // contributed to the candidate pair pool.
+    if (c.candidate) {
+      const m = /typ (\w+)/.exec(c.candidate);
+      logger?.log('debug', 'peer', {
+        role,
+        ice: 'remote',
+        type: m?.[1] ?? 'unknown',
+      });
+    }
     if (!remoteDescriptionSet) {
       pendingRemoteIce.push(c);
       return;
