@@ -5,7 +5,7 @@
 //   Typed adapter around `RTCPeerConnection` + a single
 //   `RTCDataChannel` (IMPLEMENTATION_PLAN Step 12).
 //
-//   The peer is a pure transport — it knows nothing about the
+//   The peer is a pure transport â€” it knows nothing about the
 //   game store, React, or the DOM beyond the WebRTC API itself.
 //   Higher layers (signaling client, store glue) consume the
 //   `Peer` interface and never touch `RTCPeerConnection`
@@ -17,7 +17,7 @@
 //     1. The `Peer` interface and its event shape.
 //     2. The `createPeer({ role, logger, rtcConfig, rtcFactory })`
 //        factory. `rtcFactory` is an injection seam so unit
-//        tests can run under Node with a fake RTC shim — Step 12
+//        tests can run under Node with a fake RTC shim â€” Step 12
 //        explicitly requires this.
 //     3. ICE-candidate buffering: candidates received before the
 //        remote description is set are queued and flushed once
@@ -41,7 +41,7 @@ import {
 import type { NetLogger } from './log';
 import { SignalingAbortError, type SignalingClient } from './signaling';
 
-// ── Public types ──────────────────────────────────────────────
+// â”€â”€ Public types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /** Which side of the handshake this peer plays. */
 export type PeerRole = 'host' | 'joiner';
@@ -57,7 +57,7 @@ export type PeerState = 'new' | 'connecting' | 'open' | 'closed' | 'failed';
 /**
  * Strongly-typed event map for `Peer.on`. Adding a new event here
  * forces every caller to handle it (or explicitly ignore it),
- * which is what we want — a silent transport event is a bug.
+ * which is what we want â€” a silent transport event is a bug.
  */
 export interface PeerEvents {
   /** Connection state changed. Idempotent: same state twice is suppressed. */
@@ -80,8 +80,8 @@ export interface PeerEvents {
  * The transport surface the rest of the net layer talks to.
  *
  * Lifecycle:
- *   host:    createOffer → (relay SDP) → acceptAnswer → exchange ICE → 'open'
- *   joiner:  acceptOffer → createAnswer → (relay SDP) → exchange ICE → 'open'
+ *   host:    createOffer â†’ (relay SDP) â†’ acceptAnswer â†’ exchange ICE â†’ 'open'
+ *   joiner:  acceptOffer â†’ createAnswer â†’ (relay SDP) â†’ exchange ICE â†’ 'open'
  *
  * `send` is safe to call only when `state === 'open'`; calling
  * earlier throws synchronously. We could buffer instead, but
@@ -114,7 +114,7 @@ export interface Peer {
   readonly role: PeerRole;
 }
 
-// ── Factory options ───────────────────────────────────────────
+// â”€â”€ Factory options â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
  * `createPeer` options. Almost everything is optional so callers
@@ -129,7 +129,7 @@ export interface CreatePeerOptions {
   /**
    * Test seam: produces an `RTCPeerConnection`. Defaults to
    * `(cfg) => new RTCPeerConnection(cfg)`. Tests pass a fake.
-   * Kept narrow on purpose — no logger/role visibility here.
+   * Kept narrow on purpose â€” no logger/role visibility here.
    */
   rtcFactory?: (config?: RTCConfiguration) => RTCPeerConnection;
 }
@@ -137,11 +137,11 @@ export interface CreatePeerOptions {
 /** DataChannel label is part of the wire contract. Both sides must agree. */
 export const DATA_CHANNEL_LABEL = 'mojong';
 
-// ── ICE server configuration ──────────────────────────────────
+// â”€â”€ ICE server configuration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
  * Default fallback `iceServers` used only when the caller does
- * not provide `rtcConfig`. STUN-only — covers most home networks
+ * not provide `rtcConfig`. STUN-only â€” covers most home networks
  * but cannot punch through symmetric NAT. The full TURN list is
  * fetched at runtime by `src/net/iceServers.ts` and passed in
  * via `rtcConfig` so credentials never live in the client bundle.
@@ -152,7 +152,7 @@ const DEFAULT_STUN_FALLBACK: RTCIceServer[] = [
   { urls: 'stun:stun.cloudflare.com:3478' },
 ];
 
-// ── Implementation ────────────────────────────────────────────
+// â”€â”€ Implementation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
  * Build a `Peer`.
@@ -199,7 +199,7 @@ export function createPeer(options: CreatePeerOptions): Peer {
   const pc = factory(effectiveConfig);
 
   // ICE candidates received before the remote description is set
-  // must be queued — `addIceCandidate` rejects otherwise.
+  // must be queued â€” `addIceCandidate` rejects otherwise.
   const pendingRemoteIce: RTCIceCandidateInit[] = [];
   let remoteDescriptionSet = false;
 
@@ -213,11 +213,11 @@ export function createPeer(options: CreatePeerOptions): Peer {
     emit('state', next);
   };
 
-  // ── DataChannel wiring ──────────────────────────────────────
+  // â”€â”€ DataChannel wiring â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /**
    * Hook up message/open/close handlers on a DataChannel. Used
-   * by both sides — host creates the channel up front, joiner
+   * by both sides â€” host creates the channel up front, joiner
    * receives it via `ondatachannel`.
    */
   const attachDataChannel = (ch: RTCDataChannel): void => {
@@ -268,7 +268,7 @@ export function createPeer(options: CreatePeerOptions): Peer {
     };
   }
 
-  // ── Connection-level events ─────────────────────────────────
+  // â”€â”€ Connection-level events â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   pc.onicecandidate = (ev) => {
     // `null` candidate marks end-of-candidates and is forwarded
@@ -299,7 +299,7 @@ export function createPeer(options: CreatePeerOptions): Peer {
 
   // Both `connectionState` and `iceConnectionState` can move us
   // between high-level states; whichever fires first wins.
-  // We deliberately ignore the transient `'disconnected'` state —
+  // We deliberately ignore the transient `'disconnected'` state â€”
   // it commonly appears mid-handshake before settling, and treating
   // it as a terminal failure aborts otherwise-healthy connections.
   // The DataChannel's `onclose` will fire if the channel actually
@@ -310,8 +310,8 @@ export function createPeer(options: CreatePeerOptions): Peer {
     else if (cs === 'failed') setState('failed');
     else if (cs === 'closed') setState('closed');
     // 'connected' and 'disconnected' are intentionally ignored:
-    //  - 'connected' → wait for DataChannel.onopen (when send works)
-    //  - 'disconnected' → transient; let it settle or escalate to 'failed'
+    //  - 'connected' â†’ wait for DataChannel.onopen (when send works)
+    //  - 'disconnected' â†’ transient; let it settle or escalate to 'failed'
   };
   pc.onconnectionstatechange = reflectConnectionState;
   pc.oniceconnectionstatechange = () => {
@@ -339,7 +339,7 @@ export function createPeer(options: CreatePeerOptions): Peer {
     });
   };
 
-  // ── Public methods ──────────────────────────────────────────
+  // â”€â”€ Public methods â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const flushPendingRemoteIce = async (): Promise<void> => {
     while (pendingRemoteIce.length > 0) {
@@ -453,19 +453,19 @@ export function createPeer(options: CreatePeerOptions): Peer {
   };
 }
 
-// ── connectViaSignaling ───────────────────────────────────────
+// â”€â”€ connectViaSignaling â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
  * Drive a `Peer` end-to-end using a `SignalingClient`.
  *
- *   Inputs : `peer`   — built by `createPeer({ role })`
- *            `client` — already past `host()` / `join()`, so it
+ *   Inputs : `peer`   â€” built by `createPeer({ role })`
+ *            `client` â€” already past `host()` / `join()`, so it
  *                       has a code + bearer token
- *            `role`   — must match how `peer` was built; passed
+ *            `role`   â€” must match how `peer` was built; passed
  *                       in explicitly to keep this orchestrator
  *                       a pure adapter that doesn't read the
  *                       peer's private `role` field
- *            `logger` — optional, same as `createPeer`
+ *            `logger` â€” optional, same as `createPeer`
  *
  *   Output : a Promise that resolves once `peer.state === 'open'`
  *            and rejects on `'failed'`, `'closed'`, or any
@@ -480,7 +480,7 @@ export function createPeer(options: CreatePeerOptions): Peer {
  *
  *   Cleanup: on resolve OR reject this function unsubscribes
  *            its listeners. It does NOT close the peer or the
- *            client — that's the caller's call (e.g. the lobby
+ *            client â€” that's the caller's call (e.g. the lobby
  *            UI keeps the peer alive long after open).
  */
 export async function connectViaSignaling(
@@ -494,7 +494,7 @@ export async function connectViaSignaling(
 
   // Forward local ICE candidates to the server. We swallow errors
   // here (logging them) because losing one candidate doesn't have
-  // to be fatal — WebRTC will pick another path if it can.
+  // to be fatal â€” WebRTC will pick another path if it can.
   const offIce = peer.on('ice', (cand) => {
     client.postIce(role, cand).catch((err: unknown) => {
       if (stopped) return;
@@ -521,7 +521,7 @@ export async function connectViaSignaling(
       }
     }
   };
-  // Detached on purpose — no top-level await.
+  // Detached on purpose â€” no top-level await.
   void drainIce();
 
   // Watch peer state to know when we're done.
@@ -536,7 +536,7 @@ export async function connectViaSignaling(
       }
     });
     // If the peer is already in a terminal/open state when we
-    // subscribe, the event has already fired — check up front.
+    // subscribe, the event has already fired â€” check up front.
     if (peer.state === 'open') resolve();
     else if (peer.state === 'failed' || peer.state === 'closed') {
       reject(new Error(`peer entered terminal state: ${peer.state}`));
@@ -575,19 +575,19 @@ export async function connectViaSignaling(
  * Send a `PING` over `peer` and resolve with the round-trip time
  * in milliseconds once the matching `PONG` arrives.
  *
- * Inputs : `peer`      � open `Peer` to use as transport.
- *          `ping`      � fully stamped PING envelope. The caller
+ * Inputs : `peer`      — open `Peer` to use as transport.
+ *          `ping`      — fully stamped PING envelope. The caller
  *                        owns the `seq` cursor, so we don't touch
  *                        it here; `ping.t` is used as the send
  *                        timestamp when measuring RTT.
- *          `timeoutMs` � reject after this long without a PONG.
+ *          `timeoutMs` — reject after this long without a PONG.
  *                        Defaults to 10 s, comfortably above the
  *                        heartbeat interval.
- * Output : `Promise<number>` � measured RTT in ms.
+ * Output : `Promise<number>` — measured RTT in ms.
  * Side fx: writes one message to the peer; subscribes to peer
  *          events for the duration of the wait and unsubscribes
  *          on resolve / reject. Does NOT close the peer on
- *          timeout � caller decides whether a missed PONG is
+ *          timeout — caller decides whether a missed PONG is
  *          fatal or just a quality dip.
  */
 export function sendPing(

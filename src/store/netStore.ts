@@ -544,7 +544,7 @@ export const useNetStore = create<NetState>((set, get) => {
         if (msg.seq === expectedRemoteSeq) expectedRemoteSeq = msg.seq + 1;
         // Peer signalled a clean disconnect. If we haven't started
         // a game yet, fall back to the lobby's error state so the
-        // user can retry. (Step 19 will handle in-game BYE.)
+        // user can retry.
         if (!get().gameStarted) {
           teardown();
           set({
@@ -561,20 +561,31 @@ export const useNetStore = create<NetState>((set, get) => {
             lastSeenAt: null,
             error: 'Opponent left the lobby.',
           });
+          return;
         }
+        // Mid-game BYE: end the local game in favour of the
+        // surviving player (the local one, since the peer left),
+        // then tear the session down so any future "Network Game"
+        // click starts clean. The GameCanvas already routes back
+        // to the main menu after `phase === 'finished'`.
+        handleRemoteAbort('left');
         return;
       }
     });
 
     // Long-lived state listener: if the channel drops *after* the
-    // handshake (peer closed their tab / network died) and we are
-    // still in the lobby, surface a friendly error so the other
-    // user isn't stranded on a "Connected" screen forever.
+    // handshake (peer closed their tab / network died), tell the
+    // local game so the survivor isn't stranded on a frozen board.
     peer.on('state', (s) => {
       if (s !== 'closed' && s !== 'failed') return;
-      if (get().gameStarted) return; // game-time disconnect: Step 19
       // Don't clobber an existing error (e.g. from BYE handler).
       if (get().status === 'error') return;
+      if (get().gameStarted) {
+        // Mid-game disconnect (closed tab, dead network…).
+        // Same treatment as a BYE: opponent forfeits, we tear down.
+        handleRemoteAbort('disconnected');
+        return;
+      }
       teardown();
       set({
         status: 'error',
@@ -591,6 +602,51 @@ export const useNetStore = create<NetState>((set, get) => {
         error: 'Opponent disconnected.',
       });
     });
+  }
+
+  /**
+   * Common path for "peer is gone while the game is in progress".
+   *
+   * Inputs : `cause` — short tag used in logs only.
+   * Outputs: none.
+   * Side fx: marks the LOCAL player as the winner (the peer
+   *          forfeited by leaving), then tears down the session.
+   *
+   * Why forfeit the opponent? In v1 there's no grace timer or
+   * reconnect (those land in Step 19). A surviving player should
+   * still see a clean end-screen instead of a dead board, and
+   * "the player who walked away loses" is the most defensible
+   * default. The CanvasGame's existing `phase === 'finished'`
+   * UI handles routing back to the main menu on tap.
+   */
+  function handleRemoteAbort(cause: string): void {
+    const gs = useGameStore.getState();
+    const game = gs.game;
+    if (game && game.phase === 'playing') {
+      const localIdx = gs.localPlayerIndex ?? 0;
+      const opponent = game.players[localIdx === 0 ? 1 : 0];
+      gs.forfeit(opponent.id); // sets winnerId = local player
+    }
+    // Drop the wire immediately. The store reset clears
+    // `gameStarted` so the user can launch a new network game
+    // without a hard refresh.
+    teardown();
+    set({
+      status: 'idle',
+      code: null,
+      role: null,
+      mode: null,
+      localPlayerIndex: null,
+      gameStarted: false,
+      peerProfile: null,
+      peerDeviceId: null,
+      quality: null,
+      lastRttMs: null,
+      lastSeenAt: null,
+      error: null,
+    });
+    // `cause` is purely diagnostic — no UI surface in v1.
+    void cause;
   }
 
   /**
@@ -998,3 +1054,44 @@ export const useNetStore = create<NetState>((set, get) => {
     },
   };
 });
+
+// ── Auto-cleanup when the network game ends ───────────────────
+//
+// Without this, finishing a networked game leaves `gameStarted`
+// stuck at `true`; opening the lobby afterwards then bounces the
+// user straight back to `/play` (the stale game) because the
+// lobby reacts to `gameStarted`. We watch the gameStore for the
+// `'playing' → 'finished' | 'draw'` transition and clean up the
+// session here so the next "Network Game" click starts fresh.
+//
+// Best-effort BYE: it tells the peer we're done so their UI can
+// also leave to the menu. A `send` throw is swallowed because the
+// channel may already be half-closed (peer left first).
+
+useGameStore.subscribe((state, prev) => {
+  const wasPlaying = prev.game?.phase === 'playing';
+  const nowEnded =
+    state.game?.phase === 'finished' || state.game?.phase === 'draw';
+  if (!wasPlaying || !nowEnded) return;
+
+  const net = useNetStore.getState();
+  if (!net.gameStarted) return;
+
+  if (currentPeer) {
+    try {
+      currentPeer.send({
+        v: PROTOCOL_VERSION,
+        gameId: net.code ?? '',
+        senderId: getDeviceId(),
+        seq: outgoingSeq++,
+        t: Date.now(),
+        type: 'BYE',
+        reason: 'normal',
+      });
+    } catch {
+      // ignore — channel may already be down
+    }
+  }
+  useNetStore.getState().endNetworkSession();
+});
+

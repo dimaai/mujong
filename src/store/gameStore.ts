@@ -620,8 +620,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   acceptDraw: () => {
-    const { game } = get();
+    const { game, mode, localPlayerIndex } = get();
     if (!game || game.phase !== 'playing' || !game.drawOfferFrom) return;
+    // In a networked game only the OPPONENT of the offerer may
+    // accept. Without this gate a stray click on the offerer's
+    // side could short-circuit the agreement.
+    if (mode === 'network' && localPlayerIndex !== null) {
+      const localId = game.players[localPlayerIndex].id;
+      if (game.drawOfferFrom === localId) return;
+    }
     set({
       game: { ...game, phase: 'draw', drawOfferFrom: null, drawReason: 'agreement' },
       selectedInstanceId: null,

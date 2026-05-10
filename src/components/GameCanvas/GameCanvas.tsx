@@ -150,6 +150,10 @@ export function GameCanvas() {
   // thread it through the click handlers + panel `isActive` props.
   const isNetwork = mode === 'network' && localPlayerIndex !== null;
   const isOpponentTurn = isNetwork && currentPlayerIndex !== localPlayerIndex;
+  // Network joiner sees the board upside-down so they (P2) appear
+  // at the bottom and their opponent at the top — same as the host's
+  // perspective. Local two-player play keeps the original layout.
+  const viewFlipped = isNetwork && localPlayerIndex === 1;
   // ────────────────────────────────────────────────────────────
 
   /** is called when the user clicks an empty (or highlighted) cell.
@@ -234,18 +238,24 @@ export function GameCanvas() {
     return `${m}:${s}`;
   }
 
-  // Player 1 (bottom, index 0) is enlarged when it's their turn.
-  // Player 2 (top, index 1) is enlarged when it's their turn.
-  const p1Enlarged = currentPlayerIndex === 0;
-  const p2Enlarged = currentPlayerIndex === 1;
+  // Which raw player index goes on top vs bottom of the layout.
+  // In the non-flipped case (local play + network host): P2 on top,
+  // P1 on bottom — the historical layout. When the joiner flips
+  // the board: P1 (opponent) on top, P2 (self) on bottom.
+  const topIndex: 0 | 1 = viewFlipped ? 0 : 1;
+  const bottomIndex: 0 | 1 = viewFlipped ? 1 : 0;
 
   // Winning move targets: positions beyond the board that the panels absorb.
-  // Player 0 wins by crossing the top (row < 0) → P2's panel (top) is the target.
-  // Player 1 wins by crossing the bottom (row >= boardHeight) → P1's panel (bottom) is the target.
-  const topPanelWinTargets = validMoveTargets.filter((p) => p.row < 0);
-  const bottomPanelWinTargets = validMoveTargets.filter(
-    (p) => p.row >= level.boardHeight,
-  );
+  // P0 wins by crossing raw row<0 (above the board); P1 wins by crossing
+  // raw row>=h (below the board). When `viewFlipped` is true, the visual
+  // top of the screen corresponds to raw row>=h instead of row<0, so we
+  // swap which set of targets each panel receives.
+  const topPanelWinTargets = viewFlipped
+    ? validMoveTargets.filter((p) => p.row >= level.boardHeight)
+    : validMoveTargets.filter((p) => p.row < 0);
+  const bottomPanelWinTargets = viewFlipped
+    ? validMoveTargets.filter((p) => p.row < 0)
+    : validMoveTargets.filter((p) => p.row >= level.boardHeight);
 
   const gameOver = phase === 'finished' || phase === 'draw';
 
@@ -329,28 +339,31 @@ export function GameCanvas() {
 
       {/* ── Main vertical stack ────────────────────────────── */}
       <div className={styles.stack}>
-        {/* Player 2 panel (top) — full width including timer bar areas */}
+        {/* Top player panel — full width including timer bar areas */}
         <PlayerPanel
-          playerId={players[1].id}
-          playerName={players[1].name}
-          playerColor={PlayerColors[players[1].id]}
+          playerId={players[topIndex].id}
+          playerName={players[topIndex].name}
+          playerColor={PlayerColors[players[topIndex].id]}
           figures={figures}
-          isActive={currentPlayerIndex === 1 && phase === 'playing' && !isOpponentTurn}
-          isEnlarged={p2Enlarged}
+          isActive={currentPlayerIndex === topIndex && phase === 'playing' && !isOpponentTurn}
+          isEnlarged={currentPlayerIndex === topIndex}
           selectedInstanceId={selectedInstanceId}
           onSelectFigure={selectAvailableFigure}
-          onMenuToggle={() => setMenuOpenFor((p) => p === players[1].id ? null : players[1].id)}
+          onMenuToggle={() => setMenuOpenFor((p) => p === players[topIndex].id ? null : players[topIndex].id)}
           cellSize={cellSize}
           boardPixelWidth={hasTimer ? boardPixelWidth + timerBarW * 2 : boardPixelWidth}
           isPlaying={phase === 'playing'}
           winTargets={topPanelWinTargets}
           onWinClick={handleCellClick}
-          flipped={againstView}
+          // In network mode each player views the board with themselves
+          // at the bottom — the top panel is the opponent's info and
+          // must read right-side-up, so `againstView` doesn't apply.
+          flipped={isNetwork ? false : againstView}
         />
 
         {/* Board row: timer bar | board + overlays | timer bar */}
         <div className={styles.boardRow}>
-          {/* P1 Timer bar — left side */}
+          {/* Bottom-player Timer bar — left side */}
           {hasTimer && (
             <div
               className={styles.timerBar}
@@ -360,11 +373,11 @@ export function GameCanvas() {
                 className={styles.timerBarFill}
                 style={{
                   bottom: 0,
-                  height: `${p1TimerPct}%`,
-                  background: PlayerColors[players[0].id] + '80',
+                  height: `${bottomIndex === 0 ? p1TimerPct : p2TimerPct}%`,
+                  background: PlayerColors[players[bottomIndex].id] + '80',
                 }}
               />
-              <span className={styles.timerText}>{formatTime(playerTimers[0])}</span>
+              <span className={styles.timerText}>{formatTime(playerTimers[bottomIndex])}</span>
             </div>
           )}
 
@@ -380,6 +393,10 @@ export function GameCanvas() {
               validMoveTargets={validMoveTargets}
               onCellClick={handleCellClick}
               onFigureClick={handleFigureClick}
+              viewFlipped={viewFlipped}
+              // In network mode the entire board is flipped for the
+              // joiner; per-piece P2 rotation would un-flip the icons.
+              flipPlayer2Pieces={!isNetwork}
             />
 
             {/* Sandwich-menu overlay */}
@@ -391,11 +408,13 @@ export function GameCanvas() {
                   style={{
                     width: boardPixelWidth,
                     height: Math.round(boardPixelHeight / 3),
-                    ...(menuOpenFor === players[0].id ? { bottom: 0 } : { top: 0 }),
+                    // Anchor the menu to whichever edge of the board
+                    // the requesting player's panel sits on.
+                    ...(menuOpenFor === players[bottomIndex].id ? { bottom: 0 } : { top: 0 }),
                   }}
                 >
                   <span className={styles.menuPlayerName}>
-                    {menuOpenFor === players[0].id ? players[0].name : players[1].name}
+                    {players.find((p) => p.id === menuOpenFor)?.name}
                   </span>
                   <div className={styles.menuButtons}>
                     <button
@@ -421,30 +440,62 @@ export function GameCanvas() {
               </>
             )}
 
-            {/* Draw response panel (opponent accepts / declines) */}
-            {drawOfferFrom && phase === 'playing' && !menuOpenFor && (
-              <div
-                className={styles.drawPanel}
-                style={{
-                  width: boardPixelWidth,
-                  height: cellSize * 2,
-                  ...(drawOfferFrom === players[0].id ? { top: 0 } : { bottom: 0 }),
-                }}
-              >
-                <span className={styles.drawPanelText}>Draw offered</span>
-                <div className={styles.drawPanelButtons}>
-                  <button className={styles.menuBtn} onClick={acceptDraw}>
-                    Accept
-                  </button>
-                  <button className={styles.menuBtn} onClick={rejectDraw}>
-                    Decline
-                  </button>
+            {/* Draw response panel.
+                Local play: both sides share the screen — render the
+                  Accept/Decline buttons opposite the offerer.
+                Network play: only the RECEIVER of the offer sees the
+                  buttons. The offerer just sees a "Draw offered…"
+                  notice on their own side and can `rejectDraw` to
+                  cancel. */}
+            {drawOfferFrom && phase === 'playing' && !menuOpenFor && (() => {
+              const offererIsLocal =
+                isNetwork &&
+                localPlayerIndex !== null &&
+                drawOfferFrom === players[localPlayerIndex].id;
+              return (
+                <div
+                  className={styles.drawPanel}
+                  style={{
+                    width: boardPixelWidth,
+                    height: cellSize * 2,
+                    // In network mode the panel is anchored to the
+                    // RECEIVER (or to the offerer when they're the
+                    // local player viewing their own "waiting" notice).
+                    ...(drawOfferFrom === players[bottomIndex].id
+                      ? { top: 0 }
+                      : { bottom: 0 }),
+                  }}
+                >
+                  <span className={styles.drawPanelText}>
+                    {offererIsLocal ? 'Draw offered — waiting…' : 'Draw offered'}
+                  </span>
+                  <div className={styles.drawPanelButtons}>
+                    {offererIsLocal ? (
+                      // The offerer can withdraw the offer; this just
+                      // clears `drawOfferFrom` locally. In v1 there is
+                      // no `DRAW_CANCEL` wire verb yet, so the peer
+                      // still sees the offer until they respond — a
+                      // follow-up can add the verb if it's a problem.
+                      <button className={styles.menuBtn} onClick={rejectDraw}>
+                        Cancel
+                      </button>
+                    ) : (
+                      <>
+                        <button className={styles.menuBtn} onClick={acceptDraw}>
+                          Accept
+                        </button>
+                        <button className={styles.menuBtn} onClick={rejectDraw}>
+                          Decline
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
 
-          {/* P2 Timer bar — right side */}
+          {/* Top-player Timer bar — right side */}
           {hasTimer && (
             <div
               className={styles.timerBar}
@@ -454,26 +505,26 @@ export function GameCanvas() {
                 className={styles.timerBarFill}
                 style={{
                   top: 0,
-                  height: `${p2TimerPct}%`,
-                  background: PlayerColors[players[1].id] + '80',
+                  height: `${topIndex === 1 ? p2TimerPct : p1TimerPct}%`,
+                  background: PlayerColors[players[topIndex].id] + '80',
                 }}
               />
-              <span className={styles.timerText}>{formatTime(playerTimers[1])}</span>
+              <span className={styles.timerText}>{formatTime(playerTimers[topIndex])}</span>
             </div>
           )}
         </div>
 
-        {/* Player 1 panel (bottom) — full width including timer bar areas */}
+        {/* Bottom player panel — full width including timer bar areas */}
         <PlayerPanel
-          playerId={players[0].id}
-          playerName={players[0].name}
-          playerColor={PlayerColors[players[0].id]}
+          playerId={players[bottomIndex].id}
+          playerName={players[bottomIndex].name}
+          playerColor={PlayerColors[players[bottomIndex].id]}
           figures={figures}
-          isActive={currentPlayerIndex === 0 && phase === 'playing' && !isOpponentTurn}
-          isEnlarged={p1Enlarged}
+          isActive={currentPlayerIndex === bottomIndex && phase === 'playing' && !isOpponentTurn}
+          isEnlarged={currentPlayerIndex === bottomIndex}
           selectedInstanceId={selectedInstanceId}
           onSelectFigure={selectAvailableFigure}
-          onMenuToggle={() => setMenuOpenFor((p) => p === players[0].id ? null : players[0].id)}
+          onMenuToggle={() => setMenuOpenFor((p) => p === players[bottomIndex].id ? null : players[bottomIndex].id)}
           cellSize={cellSize}
           boardPixelWidth={hasTimer ? boardPixelWidth + timerBarW * 2 : boardPixelWidth}
           isPlaying={phase === 'playing'}

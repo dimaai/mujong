@@ -47,6 +47,20 @@ interface BoardProps {
   onCellClick: (pos: Position) => void;
   /** Called when the user clicks a placed figure on the board. */
   onFigureClick: (instanceId: string) => void;
+  /**
+   * Render the board upside-down. Used by the joiner in a
+   * networked game so each player sees themselves at the bottom.
+   * Only the visual layout changes — `onCellClick` still reports
+   * the underlying `(col, row)` so the rules engine stays oblivious.
+   */
+  viewFlipped?: boolean;
+  /**
+   * When true, P2's icons are rotated 180° on the board. This is
+   * the legacy "two players sharing one screen" convention. Pass
+   * `false` in network mode (the board itself is flipped instead,
+   * so a per-piece rotation would un-flip them).
+   */
+  flipPlayer2Pieces?: boolean;
 }
 
 // ── Board component ───────────────────────────────────────────
@@ -68,6 +82,8 @@ export function Board({
   validMoveTargets,
   onCellClick,
   onFigureClick,
+  viewFlipped = false,
+  flipPlayer2Pieces = true,
 }: BoardProps) {
   const { boardWidth, boardHeight } = level;
 
@@ -97,6 +113,14 @@ export function Board({
       // Checkerboard pattern: light when (row + col) is even.
       const isLight = (row + col) % 2 === 0;
 
+      // When the board is flipped (network joiner), raw row 0 must
+      // render at the BOTTOM of the grid. We override `gridRow`
+      // per cell instead of transforming the grid container so
+      // figure icons remain right-side-up automatically.
+      const cellStyle: React.CSSProperties | undefined = viewFlipped
+        ? { gridColumn: col + 1, gridRow: boardHeight - row }
+        : undefined;
+
       // Wall cells render as a distinct, non-interactive variant.
       // No click handler, no figure (walls and figures can't share a
       // cell since the rules engine forbids landing on walls).
@@ -109,6 +133,7 @@ export function Board({
               isLight ? styles.cellLight : styles.cellDark,
               styles.cellWall,
             ].join(' ')}
+            style={cellStyle}
             role="presentation"
             aria-label="Wall"
           />,
@@ -127,6 +152,7 @@ export function Board({
           ]
             .filter(Boolean)
             .join(' ')}
+          style={cellStyle}
           onClick={() => {
             if (figure && !isHighlighted) {
               // Clicked a piece — delegate to parent for selection logic.
@@ -143,7 +169,7 @@ export function Board({
               isSelected={isSelected}
               color={playerColors[figure.playerId] ?? '#888'}
               iconSize={Math.max(16, cellSize - 6)}
-              flipped={figure.playerId === 'p2'}
+              flipped={flipPlayer2Pieces && figure.playerId === 'p2'}
             />
           )}
         </div>,
