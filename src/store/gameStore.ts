@@ -54,14 +54,23 @@ let snapshotPending = false;
 
 function flushSnapshot(): void {
   snapshotPending = false;
-  const current = useGameStore.getState().game;
+  const { game, mode } = useGameStore.getState();
   // Only an actively-playing game is worth resuming. If it ended,
   // got drawn, or was torn down, drop the entry entirely.
-  if (!current || current.phase !== 'playing') {
+  if (!game || game.phase !== 'playing') {
     removeItem(STORAGE_KEYS.gameSnapshot);
     return;
   }
-  setEnvelope<GameState>(STORAGE_KEYS.gameSnapshot, current);
+  // Never snapshot a network game. The opponent's peer connection
+  // is gone after a reload, so resuming would silently degrade the
+  // match into a local 2-player game on the wrong device. Auto-
+  // reconnect (Step 19.5) is the proper recovery path; until then
+  // a closed tab simply ends the network match.
+  if (mode === 'network') {
+    removeItem(STORAGE_KEYS.gameSnapshot);
+    return;
+  }
+  setEnvelope<GameState>(STORAGE_KEYS.gameSnapshot, game);
 }
 
 function scheduleSnapshot(): void {
@@ -407,6 +416,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
       localPlayerIndex: mode === 'network' ? (localPlayerIndex ?? 0) : null,
       actionLog: [],
     });
+
+    // Network games are not resumable (the peer is gone after a
+    // reload). Drop any leftover local snapshot so MainMenu's
+    // "Resume" path can't bring this game back as a local match.
+    if (mode === 'network') {
+      removeItem(STORAGE_KEYS.gameSnapshot);
+    }
   },
 
   selectFigure: (instanceId) => {
