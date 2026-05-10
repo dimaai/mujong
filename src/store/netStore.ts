@@ -27,6 +27,8 @@
 import { create } from 'zustand';
 
 import { getDeviceId } from '../persistence/ids';
+import { STORAGE_KEYS } from '../persistence/keys';
+import { getEnvelope, removeItem, setEnvelope } from '../persistence/storage';
 import { createNetLogger, type LogEntry } from '../net/log';
 import { fetchIceServers } from '../net/iceServers';
 import {
@@ -186,6 +188,13 @@ export interface NetState {
   connectionLost: boolean;
   /** Wall-clock (ms) at which the channel was first reported down. */
   connectionLostAt: number | null;
+  /**
+   * Step 19.5: a background `attemptReconnect` is in flight. UI
+   * surfaces this on the ReconnectOverlay ("Reconnecting…")
+   * instead of the bare "Waiting for opponent" copy. Cleared on
+   * success, on give-up, and on `endNetworkSession`.
+   */
+  reconnecting: boolean;
 
   /**
    * Start hosting. Allocates a session, advertises the code,
@@ -286,6 +295,23 @@ export interface NetState {
    * best-effort `BYE { reason: 'forfeit' }`.
    */
   resign: () => void;
+
+  /**
+   * Step 19.5: best-effort attempt to re-establish the DataChannel
+   * after a transient drop. Reads the persisted netSession record,
+   * re-attaches to the existing signaling session with our stored
+   * token, runs a fresh SDP/ICE handshake, and re-exchanges HELLO.
+   *
+   * Inputs : none (all needed state lives in the netSession envelope).
+   * Output : resolves when the DataChannel is open again, or rejects
+   *          internally (sets `reconnecting: false` and leaves the
+   *          overlay's grace timer to expire).
+   * Side fx: tears down the dead peer, allocates a new one, and
+   *          updates `reconnecting` / `connectionLost` accordingly.
+   *          On 401/404/410/429 from the server we drop the
+   *          netSession envelope so the loop stops trying.
+   */
+  attemptReconnect: () => Promise<void>;
 }
 
 /** Invitation code shape (matches the server's regex). */
@@ -296,6 +322,23 @@ export function normaliseNetCode(input: string): string | null {
   const upper = input.trim().toUpperCase();
   return NET_CODE_REGEX.test(upper) ? upper : null;
 }
+
+/**
+ * Persisted record (Step 19.5) used by `attemptReconnect` to
+ * re-attach to an existing signaling session after a transient
+ * channel drop. Stored under `STORAGE_KEYS.netSession` via the
+ * standard `Persisted<T>` envelope.
+ */
+export interface NetSessionRecord {
+  code: string;
+  role: Role;
+  ownToken: string;
+  selfProfile: Profile;
+  savedAt: number;
+}
+
+/** Auto-reconnect cadence while `connectionLost === true`. */
+const RECONNECT_RETRY_MS = 8_000;
 
 // ── Module-level non-reactive refs ────────────────────────────
 //
@@ -350,6 +393,43 @@ let beforeUnloadHandler: (() => void) | null = null;
  * of the default `'forfeit'`. Reset to `null` after each game-end.
  */
 let pendingByeReason: ByeReason | null = null;
+
+/**
+ * Step 19.5: handle of the auto-reconnect interval that ticks
+ * while `connectionLost === true`. Started by the peer-state
+ * branch that flips `connectionLost` to `true`; cleared on
+ * success or on any teardown path.
+ */
+let reconnectTimer: ReturnType<typeof setInterval> | null = null;
+
+// ── netSession persistence helpers (Step 19.5) ───────────────
+
+/** Write the re-attach record so a brief drop can resume cleanly. */
+function persistNetSession(record: NetSessionRecord): void {
+  setEnvelope<NetSessionRecord>(STORAGE_KEYS.netSession, record);
+}
+
+/** Drop the re-attach record. Idempotent. */
+function clearNetSession(): void {
+  removeItem(STORAGE_KEYS.netSession);
+}
+
+/** Read the re-attach record, or `null` if none / corrupt. */
+function readNetSession(): NetSessionRecord | null {
+  const env = getEnvelope<NetSessionRecord>(STORAGE_KEYS.netSession);
+  if (!env) return null;
+  const d = env.data;
+  if (
+    !d ||
+    typeof d.code !== 'string' ||
+    typeof d.ownToken !== 'string' ||
+    (d.role !== 'host' && d.role !== 'joiner') ||
+    !d.selfProfile
+  ) {
+    return null;
+  }
+  return d;
+}
 
 // ── Store ─────────────────────────────────────────────────────
 
@@ -482,7 +562,25 @@ export const useNetStore = create<NetState>((set, get) => {
       status: 'connected',
       peerProfile: hello.profile,
       peerDeviceId: hello.senderId,
+      // Step 19.5: a successful (re)handshake clears any pending
+      // reconnect state and stops the auto-retry loop.
+      connectionLost: false,
+      connectionLostAt: null,
+      reconnecting: false,
     });
+    stopReconnectTimer();
+    // Step 19.5: snapshot the re-attach record so a tab reload
+    // (or a transient channel drop) can find it again. The token
+    // is the SignalingClient's bearer token issued at host()/join().
+    if (client.token) {
+      persistNetSession({
+        code,
+        role,
+        ownToken: client.token,
+        selfProfile,
+        savedAt: Date.now(),
+      });
+    }
     // Start the heartbeat as soon as we're confirmed connected.
     // It will tick every 5 s and update `quality` / `lastRttMs`.
     startHeartbeat(logger);
@@ -716,6 +814,11 @@ export const useNetStore = create<NetState>((set, get) => {
         // actually ends the game.
         if (!get().connectionLost) {
           set({ connectionLost: true, connectionLostAt: Date.now() });
+          // Step 19.5: kick off the auto-reconnect loop. We retry
+          // every RECONNECT_RETRY_MS until the channel is back,
+          // the user resigns/claims, or the netSession record is
+          // dropped because the server says it's gone.
+          startReconnectTimer();
         }
         return;
       }
@@ -816,6 +919,7 @@ export const useNetStore = create<NetState>((set, get) => {
     // Stop heartbeat FIRST so its timer can't push to a closing
     // channel and surface as a noisy `peer.send` exception.
     stopHeartbeat();
+    stopReconnectTimer();
     // Clear the gameStore broadcaster first so any in-flight
     // `executeAction` doesn't try to push to a closed channel.
     setActionBroadcaster(null);
@@ -964,6 +1068,34 @@ export const useNetStore = create<NetState>((set, get) => {
     reconnectSignalled = false;
   }
 
+  /**
+   * Step 19.5: schedule (or no-op) the auto-reconnect interval.
+   * Each tick calls `attemptReconnect()` if no attempt is already
+   * in flight. Idempotent.
+   */
+  function startReconnectTimer(): void {
+    if (reconnectTimer) return;
+    // Fire one attempt immediately so the user doesn't wait the
+    // full interval after the channel drops.
+    void get().attemptReconnect();
+    reconnectTimer = setInterval(() => {
+      const s = get();
+      if (!s.connectionLost) {
+        stopReconnectTimer();
+        return;
+      }
+      if (!s.reconnecting) void get().attemptReconnect();
+    }, RECONNECT_RETRY_MS);
+  }
+
+  /** Stop the auto-reconnect interval if running. */
+  function stopReconnectTimer(): void {
+    if (reconnectTimer) {
+      clearInterval(reconnectTimer);
+      reconnectTimer = null;
+    }
+  }
+
   return {
     status: 'idle',
     code: null,
@@ -980,10 +1112,15 @@ export const useNetStore = create<NetState>((set, get) => {
     logs: [],
     connectionLost: false,
     connectionLostAt: null,
+    reconnecting: false,
 
     async host(selfProfile) {
       if (inFlight) return;
       inFlight = true;
+      // Drop any stale re-attach record from a prior session so a
+      // failed handshake here doesn't leave a misleading envelope
+      // on disk that a future tab might try to resume from.
+      clearNetSession();
       // Reset state but stay on `'idle'` until we have a code, so
       // the UI can show a generic "starting…" without flashing
       // stale fields from a previous session.
@@ -1026,6 +1163,7 @@ export const useNetStore = create<NetState>((set, get) => {
         return;
       }
       inFlight = true;
+      clearNetSession();
       set({
         status: 'joining',
         code,
@@ -1172,6 +1310,7 @@ export const useNetStore = create<NetState>((set, get) => {
 
     endNetworkSession() {
       teardown();
+      clearNetSession();
       set({
         status: 'idle',
         code: null,
@@ -1187,6 +1326,7 @@ export const useNetStore = create<NetState>((set, get) => {
         error: null,
         connectionLost: false,
         connectionLostAt: null,
+        reconnecting: false,
       });
     },
 
@@ -1260,6 +1400,112 @@ export const useNetStore = create<NetState>((set, get) => {
       const localId = gs.game.players[localIdx].id;
       pendingByeReason = 'forfeit';
       gs.forfeit(localId);
+    },
+
+    async attemptReconnect() {
+      // Step 19.5: idempotent guard. The auto-loop calls this every
+      // RECONNECT_RETRY_MS and the user / boot path may also fire
+      // it manually. We only want one in-flight attempt at a time.
+      if (inFlight || get().reconnecting) return;
+      // Only meaningful while a connection drop is being graced.
+      // (App-boot restoration after a tab reload is intentionally
+      // out of scope for this slice — see Step 19.5 plan notes.)
+      if (!get().connectionLost) return;
+
+      const record = readNetSession();
+      if (!record) {
+        // Nothing to resume against — stop the loop so the user
+        // sees the grace timer expire and can Claim Win / Resign.
+        stopReconnectTimer();
+        return;
+      }
+
+      inFlight = true;
+      set({ reconnecting: true });
+
+      // Tear down the dead peer + signaling client BUT keep the
+      // netSession envelope on disk so subsequent retries can find
+      // it. teardown() doesn't touch the envelope.
+      try {
+        currentPeer?.close();
+      } catch {
+        /* best effort */
+      }
+      try {
+        currentClient?.close();
+      } catch {
+        /* best effort */
+      }
+      stopHeartbeat();
+      setActionBroadcaster(null);
+      currentPeer = null;
+      currentClient = null;
+      // Reset our seq cursors: after a fresh handshake the peer
+      // restarts at 0 too, so any stale expectedRemoteSeq from
+      // before the drop would otherwise fire spurious gap warnings.
+      outgoingSeq = 1;
+      expectedRemoteSeq = 1;
+
+      const client = createSignalingClient();
+      currentClient = client;
+      try {
+        client.attach({
+          code: record.code,
+          role: record.role,
+          token: record.ownToken,
+        });
+        await client.reattach();
+        await runHandshake(
+          record.role,
+          record.selfProfile,
+          record.code,
+          client,
+        );
+        // The handshake clears `connectionLost` and stops the
+        // reconnect timer. If a game was in progress we must also
+        // re-install the gameStore→peer broadcaster (teardown
+        // cleared it) so subsequent local moves resume going over
+        // the wire on the NEW DataChannel.
+        if (get().gameStarted) {
+          installActionBroadcaster();
+          // Step 20 will consume this and reply with the missed
+          // actions. Until then the peer's handler falls through
+          // (no-op) and we simply rely on the channel being open.
+          const liveP = currentPeer as Peer | null;
+          if (liveP) {
+            try {
+              liveP.send({
+                v: PROTOCOL_VERSION,
+                gameId: record.code,
+                senderId: getDeviceId(),
+                seq: outgoingSeq++,
+                t: Date.now(),
+                type: 'RESYNC_REQ',
+                fromSeq: expectedRemoteSeq,
+              });
+            } catch {
+              /* best effort — peer may already be flapping again */
+            }
+          }
+        }
+      } catch (err) {
+        // Fatal vs transient. SignalingError with these codes means
+        // the server has disowned the session and no amount of
+        // retrying will help — drop the envelope and let the grace
+        // timer expire so the user can Claim Win / Resign.
+        const fatal =
+          err instanceof SignalingError &&
+          (err.code === 'not_found' ||
+            err.code === 'bad_token' ||
+            err.code === 'reneg_limit');
+        if (fatal) {
+          clearNetSession();
+          stopReconnectTimer();
+        }
+        set({ reconnecting: false });
+      } finally {
+        inFlight = false;
+      }
     },
   };
 });

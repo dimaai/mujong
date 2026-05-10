@@ -15,7 +15,10 @@ import {
   SessionCollisionError,
   SessionNotFoundError,
   SessionAlreadyJoinedError,
+  SessionAuthError,
+  SessionRenegotiationLimitError,
   MAX_ICE_QUEUE,
+  MAX_RENEGOTIATIONS,
 } from '../store.js';
 
 function makeStore(opts: {
@@ -158,5 +161,60 @@ describe('deleteSession + prune', () => {
     expect(await oldClock.prune(50)).toBe(0);
     expect(await oldClock.prune(200)).toBe(1);
     expect(await oldClock.getSession('OLDONE')).toBeUndefined();
+  });
+});
+
+describe('reattach', () => {
+  it('rejects unknown codes with NotFound', async () => {
+    const store = makeStore({ codes: [] });
+    await expect(store.reattach('NOPE99', 'tok-x')).rejects.toBeInstanceOf(
+      SessionNotFoundError,
+    );
+  });
+
+  it('rejects an unrecognised token with AuthError', async () => {
+    const store = makeStore({ codes: ['ABC123'] });
+    await store.createSession();
+    await expect(store.reattach('ABC123', 'wrong')).rejects.toBeInstanceOf(
+      SessionAuthError,
+    );
+  });
+
+  it('accepts the host token and clears SDP/ICE state', async () => {
+    const store = makeStore({ codes: ['ABC123'] });
+    const { hostToken } = await store.createSession();
+    await store.setSdp('ABC123', 'host', 'old-host-sdp');
+    await store.setSdp('ABC123', 'joiner', 'old-joiner-sdp');
+    await store.appendIce('ABC123', 'host', '{"x":1}');
+    await store.appendIce('ABC123', 'joiner', '{"y":2}');
+
+    const out = await store.reattach('ABC123', hostToken);
+    expect(out.role).toBe('host');
+    expect(out.renegotiationCount).toBe(1);
+
+    const s = await store.getSession('ABC123');
+    expect(s!.hostSdp).toBeUndefined();
+    expect(s!.joinerSdp).toBeUndefined();
+    expect(s!.hostIce).toEqual([]);
+    expect(s!.joinerIce).toEqual([]);
+  });
+
+  it('accepts the joiner token after a join', async () => {
+    const store = makeStore({ codes: ['ABC123'] });
+    await store.createSession();
+    const { joinerToken } = await store.joinSession('ABC123');
+    const out = await store.reattach('ABC123', joinerToken);
+    expect(out.role).toBe('joiner');
+  });
+
+  it(`refuses past MAX_RENEGOTIATIONS (${MAX_RENEGOTIATIONS}) attempts`, async () => {
+    const store = makeStore({ codes: ['ABC123'] });
+    const { hostToken } = await store.createSession();
+    for (let i = 0; i < MAX_RENEGOTIATIONS; i++) {
+      await store.reattach('ABC123', hostToken);
+    }
+    await expect(
+      store.reattach('ABC123', hostToken),
+    ).rejects.toBeInstanceOf(SessionRenegotiationLimitError);
   });
 });

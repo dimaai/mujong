@@ -40,11 +40,17 @@ const GRACE_MS = 60_000;
 
 interface ReconnectOverlayProps {
   lostAt: number;
+  /**
+   * Step 19.5: when `true`, an `attemptReconnect()` is in flight.
+   * The overlay swaps its body copy from "Waiting…" to
+   * "Reconnecting…" so the user knows we're actively trying.
+   */
+  reconnecting?: boolean;
   onClaim: () => void;
   onResign: () => void;
 }
 
-export function ReconnectOverlay({ lostAt, onClaim, onResign }: ReconnectOverlayProps) {
+export function ReconnectOverlay({ lostAt, reconnecting = false, onClaim, onResign }: ReconnectOverlayProps) {
   // Tick once per second so the countdown re-renders. We don't
   // use `setTimeout(GRACE_MS)` because we also want to show the
   // remaining seconds during the wait.
@@ -85,7 +91,9 @@ export function ReconnectOverlay({ lostAt, onClaim, onResign }: ReconnectOverlay
       <p style={{ margin: 0, maxWidth: 340, lineHeight: 1.4 }}>
         {canClaim
           ? "Your opponent hasn't come back."
-          : `Waiting for your opponent to reconnect… ${secondsLeft}s`}
+          : reconnecting
+            ? `Reconnecting… ${secondsLeft}s`
+            : `Waiting for your opponent to reconnect… ${secondsLeft}s`}
       </p>
       <div style={{ display: 'flex', gap: 12, marginTop: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
         <button

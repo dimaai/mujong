@@ -76,6 +76,7 @@ export function GameCanvas() {
   // Step 19: reconnect overlay state.
   const connectionLost = useNetStore((s) => s.connectionLost);
   const connectionLostAt = useNetStore((s) => s.connectionLostAt);
+  const reconnecting = useNetStore((s) => s.reconnecting);
   const claimWin = useNetStore((s) => s.claimWin);
   const resign = useNetStore((s) => s.resign);
 
@@ -319,6 +320,7 @@ export function GameCanvas() {
       {isNetwork && connectionLost && phase === 'playing' && connectionLostAt != null && (
         <ReconnectOverlay
           lostAt={connectionLostAt}
+          reconnecting={reconnecting}
           onClaim={claimWin}
           onResign={resign}
         />

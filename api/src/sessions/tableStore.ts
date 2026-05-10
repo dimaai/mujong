@@ -40,9 +40,12 @@ import { type TokenCredential } from '@azure/core-auth';
 
 import {
   MAX_ICE_QUEUE,
+  MAX_RENEGOTIATIONS,
   SessionAlreadyJoinedError,
+  SessionAuthError,
   SessionCollisionError,
   SessionNotFoundError,
+  SessionRenegotiationLimitError,
   type AppendIceResult,
   type DrainIceResult,
   type Session,
@@ -78,6 +81,8 @@ interface SessionEntity extends TableEntity {
   hostIceJson: string;
   /** JSON-serialised `string[]`. */
   joinerIceJson: string;
+  /** Count of successful `reattach` calls; capped server-side. */
+  renegotiationCount?: number;
 }
 
 /** Translate a fetched row back into the domain `Session` shape. */
@@ -91,6 +96,7 @@ function rowToSession(row: TableEntityResult<SessionEntity>): Session {
     joinerSdp: row.joinerSdp,
     hostIce: parseIce(row.hostIceJson),
     joinerIce: parseIce(row.joinerIceJson),
+    renegotiationCount: row.renegotiationCount,
   };
 }
 
@@ -317,6 +323,40 @@ export function createTableStore(
     return { found: true, candidates };
   }
 
+  async function reattach(
+    code: string,
+    token: string,
+  ): Promise<{ role: SessionRole; renegotiationCount: number }> {
+    let role: SessionRole | null = null;
+    let nextCount = 0;
+    let limitExceeded = false;
+    let badToken = false;
+    const result = await updateWithEtag(code, (row) => {
+      if (row.hostToken === token) role = 'host';
+      else if (row.joinerToken && row.joinerToken === token) role = 'joiner';
+      else {
+        badToken = true;
+        return;
+      }
+      nextCount = (row.renegotiationCount ?? 0) + 1;
+      if (nextCount > MAX_RENEGOTIATIONS) {
+        limitExceeded = true;
+        return;
+      }
+      row.renegotiationCount = nextCount;
+      row.hostSdp = undefined;
+      row.joinerSdp = undefined;
+      row.hostIceJson = '[]';
+      row.joinerIceJson = '[]';
+    });
+    if (!result.ok) throw new SessionNotFoundError(code);
+    if (badToken) throw new SessionAuthError(code);
+    if (limitExceeded) {
+      throw new SessionRenegotiationLimitError(code, MAX_RENEGOTIATIONS);
+    }
+    return { role: role!, renegotiationCount: nextCount };
+  }
+
   async function deleteSession(code: string): Promise<boolean> {
     const c = await client();
     try {
@@ -359,6 +399,7 @@ export function createTableStore(
     setSdp,
     appendIce,
     drainIce,
+    reattach,
     deleteSession,
     prune,
   };

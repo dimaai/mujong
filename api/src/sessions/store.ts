@@ -40,6 +40,12 @@ export interface Session {
   joinerSdp?: string;
   hostIce: string[];
   joinerIce: string[];
+  /**
+   * Number of times `reattach` has succeeded for this session.
+   * Bounded by `MAX_RENEGOTIATIONS` so a misbehaving client
+   * can't pin a session forever past its 10-min TTL.
+   */
+  renegotiationCount?: number;
 }
 
 /** Which slot a write/read targets. */
@@ -47,6 +53,14 @@ export type SessionRole = 'host' | 'joiner';
 
 /** Sanity cap on a single slot's ICE queue length. */
 export const MAX_ICE_QUEUE = 256;
+
+/**
+ * Maximum number of `reattach` calls a single session will
+ * accept before refusing further renegotiation. Each side may
+ * reattach independently after a transient drop, so the cap is
+ * generous enough to absorb a few flaps from both peers.
+ */
+export const MAX_RENEGOTIATIONS = 6;
 
 /**
  * Dependencies the in-memory store needs but does not own.
@@ -78,6 +92,20 @@ export class SessionAlreadyJoinedError extends Error {
   constructor(code: string) {
     super(`session already joined: ${code}`);
     this.name = 'SessionAlreadyJoinedError';
+  }
+}
+
+export class SessionAuthError extends Error {
+  constructor(code: string) {
+    super(`bad token for session: ${code}`);
+    this.name = 'SessionAuthError';
+  }
+}
+
+export class SessionRenegotiationLimitError extends Error {
+  constructor(code: string, limit: number) {
+    super(`session ${code} exceeded reattach limit ${limit}`);
+    this.name = 'SessionRenegotiationLimitError';
   }
 }
 
@@ -120,6 +148,21 @@ export interface SessionStore {
    * caller's convenience — handlers re-serialise them on the wire.
    */
   drainIce(code: string, role: SessionRole): Promise<DrainIceResult>;
+
+  /**
+   * Re-authorise an existing peer for a fresh handshake. Validates
+   * `token` against the session's host/joiner tokens, increments
+   * the renegotiation counter (rejecting past `MAX_RENEGOTIATIONS`),
+   * and clears both SDP slots and ICE queues so the next round of
+   * `setSdp` / `appendIce` writes start clean.
+   *
+   * Throws `SessionNotFoundError`, `SessionAuthError`, or
+   * `SessionRenegotiationLimitError`.
+   */
+  reattach(
+    code: string,
+    token: string,
+  ): Promise<{ role: SessionRole; renegotiationCount: number }>;
 
   /** Returns `true` if a session was removed. */
   deleteSession(code: string): Promise<boolean>;
@@ -217,6 +260,30 @@ export function createStore(deps: StoreDeps): SessionStore {
     return { found: true, candidates };
   }
 
+  async function reattach(
+    code: string,
+    token: string,
+  ): Promise<{ role: SessionRole; renegotiationCount: number }> {
+    const s = sessions.get(code);
+    if (!s) throw new SessionNotFoundError(code);
+    let role: SessionRole;
+    if (s.hostToken === token) role = 'host';
+    else if (s.joinerToken && s.joinerToken === token) role = 'joiner';
+    else throw new SessionAuthError(code);
+    const next = (s.renegotiationCount ?? 0) + 1;
+    if (next > MAX_RENEGOTIATIONS) {
+      throw new SessionRenegotiationLimitError(code, MAX_RENEGOTIATIONS);
+    }
+    s.renegotiationCount = next;
+    // Clear both sides so the resumed handshake can't pick up
+    // stale candidates from the previous (now-dead) connection.
+    s.hostSdp = undefined;
+    s.joinerSdp = undefined;
+    s.hostIce = [];
+    s.joinerIce = [];
+    return { role, renegotiationCount: next };
+  }
+
   async function deleteSession(code: string): Promise<boolean> {
     return sessions.delete(code);
   }
@@ -239,6 +306,7 @@ export function createStore(deps: StoreDeps): SessionStore {
     setSdp,
     appendIce,
     drainIce,
+    reattach,
     deleteSession,
     prune,
   };

@@ -63,6 +63,21 @@ export interface SignalingClient {
   host(): Promise<{ code: string }>;
   /** Attach to an existing session. Throws on 404 / 409. */
   join(code: string): Promise<void>;
+  /**
+   * Hydrate the client from a previously-issued (code, role, token)
+   * triple WITHOUT calling the server. Used by `attemptReconnect`
+   * after a tab reload or transient drop, where we already hold a
+   * valid token from the original `host()`/`join()` call.
+   */
+  attach(args: { code: string; role: Role; token: string }): void;
+  /**
+   * Re-authorise this client for a fresh handshake on the same
+   * session. Server clears the SDP slots and ICE queues so the
+   * subsequent `putSdp`/`pollSdp`/`postIce`/`pollIce` calls start
+   * clean. Throws `SignalingError` on bad token / unknown code /
+   * exceeded reattach limit.
+   */
+  reattach(): Promise<{ role: Role; renegotiationCount: number }>;
   /** Write `sdp` into the named role's slot. Token-gated server-side. */
   putSdp(role: Role, sdp: string): Promise<void>;
   /**
@@ -85,6 +100,8 @@ export interface SignalingClient {
   readonly code: string | null;
   /** Caller's own role. Set after `host()` / `join()`. */
   readonly role: Role | null;
+  /** Bearer token issued by the server; opaque. */
+  readonly token: string | null;
 }
 
 /** Options for `createSignalingClient`. Both fields are optional. */
@@ -183,6 +200,31 @@ export function createSignalingClient(
     token = body.joinerToken;
   }
 
+  function attach(args: { code: string; role: Role; token: string }): void {
+    code = args.code.toUpperCase();
+    role = args.role;
+    token = args.token;
+  }
+
+  async function reattach(): Promise<{ role: Role; renegotiationCount: number }> {
+    if (!code) throw new Error('signaling: no session yet');
+    const res = await check(
+      await fetchImpl(
+        url(`/sessions/${encodeURIComponent(code)}/reattach`),
+        {
+          method: 'POST',
+          headers: authHeader(),
+        },
+      ),
+    );
+    const body = (await res.json()) as { role: Role; renegotiationCount: number };
+    // Server tells us authoritatively which slot we own. In normal
+    // use this matches our cached role; if it doesn't, trust the
+    // server (e.g. token reuse across roles in tests).
+    role = body.role;
+    return body;
+  }
+
   // ── SDP ──────────────────────────────────────────────────
 
   async function putSdp(slot: Role, sdp: string): Promise<void> {
@@ -268,6 +310,8 @@ export function createSignalingClient(
   return {
     host,
     join,
+    attach,
+    reattach,
     putSdp,
     pollSdp,
     postIce,
@@ -278,6 +322,9 @@ export function createSignalingClient(
     },
     get role() {
       return role;
+    },
+    get token() {
+      return token;
     },
   };
 }
