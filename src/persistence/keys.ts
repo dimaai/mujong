@@ -20,6 +20,12 @@ export const STORAGE_KEYS = {
   settings: "mojong.settings.v1",
   /** Snapshot of the in-progress game so it survives reloads. Phase D. */
   gameSnapshot: "mojong.gameSnapshot.v1",
+  /**
+   * Active network-session re-attach record (Step 19). Holds the
+   * minimum needed to re-run the signaling handshake after a tab
+   * reload: code + role + own auth token. Cleared on session end.
+   */
+  netSession: "mojong.netSession.v1",
 } as const;
 
 /** Union of valid key strings — handy for typing helpers. */

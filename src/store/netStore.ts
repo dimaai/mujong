@@ -37,6 +37,7 @@ import {
 } from '../net/peer';
 import {
   PROTOCOL_VERSION,
+  type ByeReason,
   type GameOptions,
   type NetMessage,
   type Profile,
@@ -175,6 +176,18 @@ export interface NetState {
   logs: LogEntry[];
 
   /**
+   * Step 19: when the underlying DataChannel reports `'closed'` or
+   * `'failed'` MID-GAME, we no longer instantly forfeit the
+   * opponent — that punishes brief WiFi blips. Instead we set
+   * `connectionLost = true` (and capture `connectionLostAt`), and
+   * the ReconnectOverlay takes over: a 60 s grace window, after
+   * which the user can Claim Win or Resign. `null` while connected.
+   */
+  connectionLost: boolean;
+  /** Wall-clock (ms) at which the channel was first reported down. */
+  connectionLostAt: number | null;
+
+  /**
    * Start hosting. Allocates a session, advertises the code,
    * and waits for a joiner. Resolves when `'connected'` is
    * reached or rejects internally (sets `'error'`) on failure.
@@ -255,6 +268,24 @@ export interface NetState {
    * Side fx: one `DRAW_CANCEL` frame on the DataChannel.
    */
   sendDrawCancel: () => void;
+
+  /**
+   * Step 19: end the game in the LOCAL player's favour because
+   * the peer is unreachable and the grace timer expired. Sends a
+   * best-effort `BYE { reason: 'timeout' }` so a peer that comes
+   * back online learns it lost.
+   *
+   * Side fx: ends the local `useGameStore` game; tears the
+   *          session down via the existing phase-change subscriber.
+   */
+  claimWin: () => void;
+
+  /**
+   * Step 19: end the game in the OPPONENT'S favour because the
+   * local player chose to resign during a disconnect. Sends a
+   * best-effort `BYE { reason: 'forfeit' }`.
+   */
+  resign: () => void;
 }
 
 /** Invitation code shape (matches the server's regex). */
@@ -312,6 +343,13 @@ const rttWindow: number[] = [];
 let reconnectSignalled = false;
 /** Optional `beforeunload` cleanup. Null when no peer is alive. */
 let beforeUnloadHandler: (() => void) | null = null;
+/**
+ * Step 19: when `claimWin` / `resign` are about to set the
+ * gameStore phase to 'finished', they stash the reason here so
+ * the phase-change subscriber sends the correct BYE verb instead
+ * of the default `'forfeit'`. Reset to `null` after each game-end.
+ */
+let pendingByeReason: ByeReason | null = null;
 
 // ── Store ─────────────────────────────────────────────────────
 
@@ -634,6 +672,25 @@ export const useNetStore = create<NetState>((set, get) => {
           });
           return;
         }
+        // Step 19: branch by reason during a game.
+        //   'forfeit' / 'normal' — peer resigned (or natural close-
+        //                          out without action/draw growth):
+        //                          local player wins.
+        //   'timeout'            — peer claimed-win because we were
+        //                          unreachable: local player LOSES.
+        //   'protocol'           — fatal bug on either side; tear
+        //                          the session down with an error.
+        if (msg.reason === 'timeout') {
+          // We lose. Forfeit the LOCAL player so the gameStore
+          // marks the opponent as winner. The phase-change
+          // subscriber will then tear the session down.
+          const gs = useGameStore.getState();
+          if (gs.game && gs.game.phase === 'playing') {
+            const localIdx = gs.localPlayerIndex ?? 0;
+            gs.forfeit(gs.game.players[localIdx].id);
+          }
+          return;
+        }
         // Mid-game BYE: end the local game in favour of the
         // surviving player (the local one, since the peer left),
         // then tear the session down so any future "Network Game"
@@ -652,9 +709,14 @@ export const useNetStore = create<NetState>((set, get) => {
       // Don't clobber an existing error (e.g. from BYE handler).
       if (get().status === 'error') return;
       if (get().gameStarted) {
-        // Mid-game disconnect (closed tab, dead network…).
-        // Same treatment as a BYE: opponent forfeits, we tear down.
-        handleRemoteAbort('disconnected');
+        // Step 19: mid-game disconnect no longer auto-forfeits.
+        // We flip into a grace state and the ReconnectOverlay
+        // gives the user 60 s before they may Claim Win / Resign.
+        // The peer is left as-is — teardown happens when the user
+        // actually ends the game.
+        if (!get().connectionLost) {
+          set({ connectionLost: true, connectionLostAt: Date.now() });
+        }
         return;
       }
       teardown();
@@ -916,6 +978,8 @@ export const useNetStore = create<NetState>((set, get) => {
     lastRttMs: null,
     lastSeenAt: null,
     logs: [],
+    connectionLost: false,
+    connectionLostAt: null,
 
     async host(selfProfile) {
       if (inFlight) return;
@@ -1121,6 +1185,8 @@ export const useNetStore = create<NetState>((set, get) => {
         lastRttMs: null,
         lastSeenAt: null,
         error: null,
+        connectionLost: false,
+        connectionLostAt: null,
       });
     },
 
@@ -1174,6 +1240,27 @@ export const useNetStore = create<NetState>((set, get) => {
         // ignore — best effort
       }
     },
+
+    claimWin() {
+      const gs = useGameStore.getState();
+      if (!gs.game || gs.game.phase !== 'playing') return;
+      const localIdx = gs.localPlayerIndex ?? 0;
+      const opponent = gs.game.players[localIdx === 0 ? 1 : 0];
+      // The subscriber at the bottom of this module will read
+      // `pendingByeReason` and send the BYE for us. We don't send
+      // it here because the channel is likely already dead.
+      pendingByeReason = 'timeout';
+      gs.forfeit(opponent.id);
+    },
+
+    resign() {
+      const gs = useGameStore.getState();
+      if (!gs.game || gs.game.phase !== 'playing') return;
+      const localIdx = gs.localPlayerIndex ?? 0;
+      const localId = gs.game.players[localIdx].id;
+      pendingByeReason = 'forfeit';
+      gs.forfeit(localId);
+    },
   };
 });
 
@@ -1212,7 +1299,13 @@ useGameStore.subscribe((state, prev) => {
     state.actionLog.length > prev.actionLog.length;
   const drawAccepted =
     prev.game?.drawOfferFrom != null && state.game?.phase === 'draw';
-  const sendBye = !actionAdvanced && !drawAccepted;
+  // If `claimWin` / `resign` queued a reason, send BYE with that
+  // reason regardless of the heuristics above (the heuristics only
+  // matter for moves and drawn-by-agreement endings).
+  const overrideReason = pendingByeReason;
+  pendingByeReason = null;
+  const sendBye = overrideReason != null || (!actionAdvanced && !drawAccepted);
+  const reason: ByeReason = overrideReason ?? 'forfeit';
 
   if (sendBye && currentPeer) {
     try {
@@ -1223,7 +1316,7 @@ useGameStore.subscribe((state, prev) => {
         seq: outgoingSeq++,
         t: Date.now(),
         type: 'BYE',
-        reason: 'normal',
+        reason,
       });
     } catch {
       // ignore — channel may already be down

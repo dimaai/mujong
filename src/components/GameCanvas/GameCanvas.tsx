@@ -22,6 +22,7 @@ import { useGameStore } from '../../store/gameStore';
 import { useNetStore } from '../../store/netStore';
 import { Board } from '../Board/Board';
 import { PlayerPanel } from '../PlayerPanel/PlayerPanel';
+import { ReconnectOverlay } from '../Network/ReconnectOverlay';
 import type { Position, TurnAction } from '../../domain/types';
 import styles from './GameCanvas.module.css';
 
@@ -72,6 +73,11 @@ export function GameCanvas() {
   const sendDrawOffer = useNetStore((s) => s.sendDrawOffer);
   const sendDrawResponse = useNetStore((s) => s.sendDrawResponse);
   const sendDrawCancel = useNetStore((s) => s.sendDrawCancel);
+  // Step 19: reconnect overlay state.
+  const connectionLost = useNetStore((s) => s.connectionLost);
+  const connectionLostAt = useNetStore((s) => s.connectionLostAt);
+  const claimWin = useNetStore((s) => s.claimWin);
+  const resign = useNetStore((s) => s.resign);
 
   // ── Responsive cell size ──────────────────────────────────
   useEffect(() => {
@@ -307,6 +313,15 @@ export function GameCanvas() {
         >
           Opponent’s turn…
         </span>
+      )}
+
+      {/* Step 19: reconnect overlay (network mode, mid-game only). */}
+      {isNetwork && connectionLost && phase === 'playing' && connectionLostAt != null && (
+        <ReconnectOverlay
+          lostAt={connectionLostAt}
+          onClaim={claimWin}
+          onResign={resign}
+        />
       )}
 
       {/* Step 18: connection-quality pill (network mode only). */}
