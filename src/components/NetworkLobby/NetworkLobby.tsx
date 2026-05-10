@@ -58,6 +58,27 @@ export function NetworkLobby(): React.ReactElement {
 
   const [joinInput, setJoinInput] = useState('');
   const [showDebug, setShowDebug] = useState(false);
+  // Hidden by default. Enabled with `?debug=1` (or any truthy
+  // value) and persisted to sessionStorage so a PWA reload
+  // keeps it on for a tester even after the URL is rewritten.
+  // `?debug=0` clears it.
+  const [debugEnabled, setDebugEnabled] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const flag = params.get('debug');
+    if (flag === '0' || flag === 'false') {
+      sessionStorage.removeItem('mojong:debug');
+      setDebugEnabled(false);
+      return;
+    }
+    if (flag !== null) {
+      sessionStorage.setItem('mojong:debug', '1');
+      setDebugEnabled(true);
+      return;
+    }
+    setDebugEnabled(sessionStorage.getItem('mojong:debug') === '1');
+  }, []);
 
   // Tear down on unmount or route change.
   useEffect(() => {
@@ -239,11 +260,13 @@ export function NetworkLobby(): React.ReactElement {
   return (
     <main className={styles.wrapper}>
       {card}
-      <DebugPanel
-        logs={logs}
-        open={showDebug}
-        onToggle={() => setShowDebug((v) => !v)}
-      />
+      {debugEnabled && (
+        <DebugPanel
+          logs={logs}
+          open={showDebug}
+          onToggle={() => setShowDebug((v) => !v)}
+        />
+      )}
     </main>
   );
 }
