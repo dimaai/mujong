@@ -225,14 +225,14 @@ export function createPeer(options: CreatePeerOptions): Peer {
     ch.onopen = () => setState('open');
     ch.onclose = () => setState('closed');
     ch.onerror = (ev) => {
+      // Suppress errors that fire during a normal close. Chromium
+      // can emit `onerror` with an empty error payload (or a benign
+      // SCTP "User Initiated Abort") when either side closes the
+      // channel cleanly — there's no actionable signal here and
+      // the sibling `onclose` already flips state to 'closed'.
+      if (ch.readyState === 'closing' || ch.readyState === 'closed') return;
       const rtcErr = (ev as RTCErrorEvent).error;
-      // Chromium fires `onerror` with no `.error` payload when the
-      // channel is closed cleanly by the peer (e.g. tab close /
-      // BYE-driven teardown). Treat that as a normal close — the
-      // sibling `onclose` handler already flips state to 'closed'.
       if (!rtcErr) return;
-      // SCTP "User Initiated Abort" is also benign — it surfaces
-      // when the local side closes its own channel.
       const sctpAbort =
         rtcErr.errorDetail === 'sctp-failure' &&
         /User Initiated Abort/i.test(rtcErr.message ?? '');
