@@ -5,7 +5,7 @@
   "description": "Signaling backend for Mojong online multiplayer (Azure Static Web Apps managed Functions).",
   "main": "dist/src/functions/*.js",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "build": "tsc",
