@@ -276,8 +276,15 @@ interface GameStore {
    */
   offerDraw: (playerId: string) => void;
 
-  /** The opponent accepts the pending draw offer. */
-  acceptDraw: () => void;
+  /**
+   * The opponent accepts the pending draw offer.
+   *
+   * `opts.source = 'remote'` bypasses the network-mode gate that
+   * normally forbids the offerer from accepting their own offer.
+   * It is used by `netStore` when applying a `DRAW_RESPONSE` from
+   * the peer (the offerer's own store must end the game on accept).
+   */
+  acceptDraw: (opts?: { source?: 'local' | 'remote' }) => void;
 
   /** The opponent rejects the pending draw offer. */
   rejectDraw: () => void;
@@ -619,13 +626,16 @@ export const useGameStore = create<GameStore>((set, get) => ({
     set({ game: { ...game, drawOfferFrom: playerId } });
   },
 
-  acceptDraw: () => {
+  acceptDraw: (opts) => {
+    const source = opts?.source ?? 'local';
     const { game, mode, localPlayerIndex } = get();
     if (!game || game.phase !== 'playing' || !game.drawOfferFrom) return;
     // In a networked game only the OPPONENT of the offerer may
-    // accept. Without this gate a stray click on the offerer's
-    // side could short-circuit the agreement.
-    if (mode === 'network' && localPlayerIndex !== null) {
+    // accept locally. Remote-source calls bypass this gate because
+    // they apply the peer's decision (and on the offerer's side,
+    // `drawOfferFrom` IS the local player — exactly the case the
+    // gate would otherwise block).
+    if (source === 'local' && mode === 'network' && localPlayerIndex !== null) {
       const localId = game.players[localPlayerIndex].id;
       if (game.drawOfferFrom === localId) return;
     }

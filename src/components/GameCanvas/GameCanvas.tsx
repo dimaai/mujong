@@ -69,6 +69,8 @@ export function GameCanvas() {
   // hook order stable across renders.
   const netQuality = useNetStore((s) => s.quality);
   const netLastRtt = useNetStore((s) => s.lastRttMs);
+  const sendDrawOffer = useNetStore((s) => s.sendDrawOffer);
+  const sendDrawResponse = useNetStore((s) => s.sendDrawResponse);
 
   // ── Responsive cell size ──────────────────────────────────
   useEffect(() => {
@@ -265,10 +267,18 @@ export function GameCanvas() {
       onClick={gameOver ? resetGame : undefined}
       style={gameOver ? { cursor: 'pointer' } : undefined}
     >
-      {/* Winner / draw banner */}
+      {/* Winner / draw banner.
+          In network mode we render "You win!" / "You lost" instead
+          of the player's name. Two devices showing the same default
+          profile name (e.g. both "Player 1") would otherwise leave
+          the survivor unsure which side won. */}
       {phase === 'finished' && winnerId && (
         <div className={styles.winnerBanner}>
-          🏆 {players.find((p) => p.id === winnerId)?.name} wins!
+          {isNetwork && localPlayerIndex !== null
+            ? winnerId === players[localPlayerIndex].id
+              ? '🏆 You win!'
+              : '😞 You lost'
+            : `🏆 ${players.find((p) => p.id === winnerId)?.name} wins!`}
         </div>
       )}
       {phase === 'draw' && (
@@ -419,13 +429,27 @@ export function GameCanvas() {
                   <div className={styles.menuButtons}>
                     <button
                       className={styles.menuBtn}
-                      onClick={() => { forfeit(menuOpenFor); setMenuOpenFor(null); }}
+                      onClick={() => {
+                        // Note: `forfeit` is NOT broadcast here.
+                        // Instead, the netStore subscribes to the
+                        // gameStore phase change and ships a `BYE`,
+                        // which the opponent translates into a win
+                        // for themselves via `handleRemoteAbort`.
+                        // Keeping the wire-level seam in one place
+                        // (netStore) avoids two sources of truth.
+                        forfeit(menuOpenFor);
+                        setMenuOpenFor(null);
+                      }}
                     >
                       Give Up
                     </button>
                     <button
                       className={styles.menuBtn}
-                      onClick={() => { offerDraw(menuOpenFor); setMenuOpenFor(null); }}
+                      onClick={() => {
+                        offerDraw(menuOpenFor);
+                        if (isNetwork) sendDrawOffer(menuOpenFor);
+                        setMenuOpenFor(null);
+                      }}
                     >
                       Offer Draw
                     </button>
@@ -445,8 +469,7 @@ export function GameCanvas() {
                   Accept/Decline buttons opposite the offerer.
                 Network play: only the RECEIVER of the offer sees the
                   buttons. The offerer just sees a "Draw offered…"
-                  notice on their own side and can `rejectDraw` to
-                  cancel. */}
+                  notice on their own side and can cancel locally. */}
             {drawOfferFrom && phase === 'playing' && !menuOpenFor && (() => {
               const offererIsLocal =
                 isNetwork &&
@@ -471,20 +494,31 @@ export function GameCanvas() {
                   </span>
                   <div className={styles.drawPanelButtons}>
                     {offererIsLocal ? (
-                      // The offerer can withdraw the offer; this just
-                      // clears `drawOfferFrom` locally. In v1 there is
-                      // no `DRAW_CANCEL` wire verb yet, so the peer
-                      // still sees the offer until they respond — a
-                      // follow-up can add the verb if it's a problem.
+                      // The offerer can withdraw locally. In v1 there
+                      // is no DRAW_CANCEL verb yet, so the peer still
+                      // sees the offer until they respond — left as
+                      // a follow-up to keep this batch small.
                       <button className={styles.menuBtn} onClick={rejectDraw}>
                         Cancel
                       </button>
                     ) : (
                       <>
-                        <button className={styles.menuBtn} onClick={acceptDraw}>
+                        <button
+                          className={styles.menuBtn}
+                          onClick={() => {
+                            acceptDraw();
+                            if (isNetwork) sendDrawResponse(true);
+                          }}
+                        >
                           Accept
                         </button>
-                        <button className={styles.menuBtn} onClick={rejectDraw}>
+                        <button
+                          className={styles.menuBtn}
+                          onClick={() => {
+                            rejectDraw();
+                            if (isNetwork) sendDrawResponse(false);
+                          }}
+                        >
                           Decline
                         </button>
                       </>

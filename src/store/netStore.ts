@@ -224,6 +224,28 @@ export interface NetState {
    * this in; Step 16 just exposes the seam).
    */
   endNetworkSession: () => void;
+
+  /**
+   * Broadcast a draw offer to the peer. Caller is expected to also
+   * call `useGameStore.offerDraw(playerId)` locally so the offerer
+   * sees their own "waiting…" panel. No-op if there's no live peer.
+   *
+   * Inputs : `offererId` — the local player's id (e.g. `'p1'`).
+   * Outputs: none.
+   * Side fx: one `DRAW_OFFER` frame on the DataChannel.
+   */
+  sendDrawOffer: (offererId: string) => void;
+
+  /**
+   * Broadcast the response to a peer's draw offer. Caller is
+   * expected to also call `acceptDraw()` / `rejectDraw()` on the
+   * gameStore so the local state matches what we just told the peer.
+   *
+   * Inputs : `accepted` — true to agree, false to decline.
+   * Outputs: none.
+   * Side fx: one `DRAW_RESPONSE` frame on the DataChannel.
+   */
+  sendDrawResponse: (accepted: boolean) => void;
 }
 
 /** Invitation code shape (matches the server's regex). */
@@ -470,6 +492,33 @@ export const useNetStore = create<NetState>((set, get) => {
         // updates the store; here we just keep the seq cursor in
         // step so the next ACTION doesn't look like a gap.
         if (msg.seq === expectedRemoteSeq) expectedRemoteSeq = msg.seq + 1;
+        return;
+      }
+
+      if (msg.type === 'DRAW_OFFER') {
+        // Mirror the offerer's id into the local gameStore so the
+        // opponent's UI renders Accept/Decline. Idempotent if the
+        // offer was already pending (gameStore.offerDraw no-ops).
+        if (msg.seq === expectedRemoteSeq) expectedRemoteSeq = msg.seq + 1;
+        try {
+          useGameStore.getState().offerDraw(msg.offererId);
+        } catch (err) {
+          logger.log('warn', 'draw.offer.apply', String(err));
+        }
+        return;
+      }
+
+      if (msg.type === 'DRAW_RESPONSE') {
+        if (msg.seq === expectedRemoteSeq) expectedRemoteSeq = msg.seq + 1;
+        try {
+          if (msg.accepted) {
+            useGameStore.getState().acceptDraw({ source: 'remote' });
+          } else {
+            useGameStore.getState().rejectDraw();
+          }
+        } catch (err) {
+          logger.log('warn', 'draw.response.apply', String(err));
+        }
         return;
       }
 
@@ -1051,6 +1100,41 @@ export const useNetStore = create<NetState>((set, get) => {
         lastSeenAt: null,
         error: null,
       });
+    },
+
+    sendDrawOffer(offererId) {
+      if (!currentPeer) return;
+      try {
+        currentPeer.send({
+          v: PROTOCOL_VERSION,
+          gameId: get().code ?? '',
+          senderId: getDeviceId(),
+          seq: outgoingSeq++,
+          t: Date.now(),
+          type: 'DRAW_OFFER',
+          offererId,
+        });
+      } catch {
+        // ignore — peer may be down; the local UI already shows
+        // the pending offer and the user can resign instead.
+      }
+    },
+
+    sendDrawResponse(accepted) {
+      if (!currentPeer) return;
+      try {
+        currentPeer.send({
+          v: PROTOCOL_VERSION,
+          gameId: get().code ?? '',
+          senderId: getDeviceId(),
+          seq: outgoingSeq++,
+          t: Date.now(),
+          type: 'DRAW_RESPONSE',
+          accepted,
+        });
+      } catch {
+        // ignore — best effort
+      }
     },
   };
 });

@@ -108,7 +108,17 @@ export type NetMessage =
       type: 'RESYNC_RES';
       fromSeq: number;
       actions: TurnAction[];
-    });
+    })
+  // Draw negotiation. Not part of the action log because the rules
+  // engine doesn't model "draw offered" as a turn — it lives on
+  // `GameState.drawOfferFrom`. We mirror that field across peers
+  // via these two verbs.
+  //   DRAW_OFFER    — sender wants a draw. Receiver shows Accept/Decline.
+  //   DRAW_RESPONSE — receiver's answer. `accepted: true` ends the
+  //                   game as a draw on both sides; `false` just
+  //                   clears the offer.
+  | (NetEnvelope & { type: 'DRAW_OFFER'; offererId: string })
+  | (NetEnvelope & { type: 'DRAW_RESPONSE'; accepted: boolean });
 
 export type NetMessageType = NetMessage['type'];
 
@@ -225,6 +235,16 @@ export function decode(raw: string): NetMessage {
         throw new NetProtocolError('RESYNC_RES.actions must be an array');
       }
       actions.forEach(validateTurnAction);
+      return ok(parsed);
+    }
+    case 'DRAW_OFFER':
+      requireString(parsed, 'offererId');
+      return ok(parsed);
+    case 'DRAW_RESPONSE': {
+      const accepted = (parsed as { accepted: unknown }).accepted;
+      if (typeof accepted !== 'boolean') {
+        throw new NetProtocolError('DRAW_RESPONSE.accepted must be boolean');
+      }
       return ok(parsed);
     }
     default:

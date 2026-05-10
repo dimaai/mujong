@@ -113,13 +113,14 @@ export function Board({
       // Checkerboard pattern: light when (row + col) is even.
       const isLight = (row + col) % 2 === 0;
 
-      // When the board is flipped (network joiner), raw row 0 must
-      // render at the BOTTOM of the grid. We override `gridRow`
-      // per cell instead of transforming the grid container so
-      // figure icons remain right-side-up automatically.
-      const cellStyle: React.CSSProperties | undefined = viewFlipped
-        ? { gridColumn: col + 1, gridRow: boardHeight - row }
-        : undefined;
+      // Per-figure rotation. In flipped view (network joiner) the
+      // whole board grid is rotated 180° via CSS — so every figure
+      // gets a counter-rotation to stay upright. In the historical
+      // local-shared-screen case the grid is NOT rotated and only
+      // P2's icons are rotated to "face" P1.
+      const figureFlipped = viewFlipped
+        ? true
+        : flipPlayer2Pieces && figure?.playerId === 'p2';
 
       // Wall cells render as a distinct, non-interactive variant.
       // No click handler, no figure (walls and figures can't share a
@@ -133,7 +134,6 @@ export function Board({
               isLight ? styles.cellLight : styles.cellDark,
               styles.cellWall,
             ].join(' ')}
-            style={cellStyle}
             role="presentation"
             aria-label="Wall"
           />,
@@ -152,7 +152,6 @@ export function Board({
           ]
             .filter(Boolean)
             .join(' ')}
-          style={cellStyle}
           onClick={() => {
             if (figure && !isHighlighted) {
               // Clicked a piece — delegate to parent for selection logic.
@@ -169,7 +168,7 @@ export function Board({
               isSelected={isSelected}
               color={playerColors[figure.playerId] ?? '#888'}
               iconSize={Math.max(16, cellSize - 6)}
-              flipped={flipPlayer2Pieces && figure.playerId === 'p2'}
+              flipped={figureFlipped}
             />
           )}
         </div>,
@@ -197,6 +196,12 @@ export function Board({
         style={{
           gridTemplateColumns: `repeat(${boardWidth}, ${cellSize}px)`,
           gridTemplateRows: `repeat(${boardHeight}, ${cellSize}px)`,
+          // viewFlipped: rotate the entire grid (including children
+          // and click hit-targets) 180° so raw row 0 appears at the
+          // visual bottom. Each FigureIcon is counter-rotated to
+          // stay upright. Click handlers still receive the cell's
+          // logical (col, row) — the rules engine is oblivious.
+          ...(viewFlipped ? { transform: 'rotate(180deg)' } : null),
         }}
       >
         {cells}
