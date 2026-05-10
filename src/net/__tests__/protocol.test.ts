@@ -40,6 +40,24 @@ const samples: Record<string, NetMessage> = {
     type: 'HELLO',
     profile: { name: 'Ada', color: '#3366ff' },
   },
+  START: {
+    ...baseEnvelope,
+    seq: 1,
+    type: 'START',
+    options: {
+      difficulty: 'normal',
+      boardSizeId: 'medium',
+      timerMinutes: 5,
+      againstView: false,
+      walls: false,
+    },
+    profiles: [
+      { name: 'Ada', color: '#1e88e5' },
+      { name: 'Linus', color: '#e53935' },
+    ],
+    hostPlayerIndex: 0,
+    seed: 'abc-123',
+  },
   ACTION_PLACE: {
     ...baseEnvelope,
     seq: 1,
@@ -138,6 +156,60 @@ describe('protocol: malformed input rejection', () => {
         type: 'RESYNC_RES',
         fromSeq: 0,
         actions: 'nope',
+      }),
+    },
+    {
+      name: 'START with unknown difficulty',
+      raw: JSON.stringify({
+        ...baseEnvelope,
+        type: 'START',
+        options: {
+          difficulty: 'insane',
+          boardSizeId: 'medium',
+          timerMinutes: 5,
+          againstView: false,
+          walls: false,
+        },
+        profiles: [
+          { name: 'A', color: '#000' },
+          { name: 'B', color: '#fff' },
+        ],
+        hostPlayerIndex: 0,
+      }),
+    },
+    {
+      name: 'START with single profile',
+      raw: JSON.stringify({
+        ...baseEnvelope,
+        type: 'START',
+        options: {
+          difficulty: 'normal',
+          boardSizeId: 'medium',
+          timerMinutes: 5,
+          againstView: false,
+          walls: false,
+        },
+        profiles: [{ name: 'A', color: '#000' }],
+        hostPlayerIndex: 0,
+      }),
+    },
+    {
+      name: 'START with bad hostPlayerIndex',
+      raw: JSON.stringify({
+        ...baseEnvelope,
+        type: 'START',
+        options: {
+          difficulty: 'normal',
+          boardSizeId: 'medium',
+          timerMinutes: 5,
+          againstView: false,
+          walls: false,
+        },
+        profiles: [
+          { name: 'A', color: '#000' },
+          { name: 'B', color: '#fff' },
+        ],
+        hostPlayerIndex: 2,
       }),
     },
   ];

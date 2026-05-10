@@ -30,6 +30,7 @@ import {
   type NetState,
 } from '../../store/netStore';
 import { useProfileStore } from '../../store/profileStore';
+import { useSettingsStore } from '../../store/settingsStore';
 import type { LogEntry } from '../../net/log';
 
 import styles from './NetworkLobby.module.css';
@@ -50,11 +51,16 @@ export function NetworkLobby(): React.ReactElement {
   const peerProfile = useNetStore((s: NetState) => s.peerProfile);
   const error = useNetStore((s: NetState) => s.error);
   const logs = useNetStore((s: NetState) => s.logs);
+  const gameStarted = useNetStore((s: NetState) => s.gameStarted);
   const host = useNetStore((s: NetState) => s.host);
   const join = useNetStore((s: NetState) => s.join);
   const leave = useNetStore((s: NetState) => s.leave);
+  const startNetworkGame = useNetStore(
+    (s: NetState) => s.startNetworkGame,
+  );
 
   const selfProfile = useProfileStore((s) => s.player1);
+  const options = useSettingsStore((s) => s.options);
 
   const [joinInput, setJoinInput] = useState('');
   const [showDebug, setShowDebug] = useState(false);
@@ -80,12 +86,24 @@ export function NetworkLobby(): React.ReactElement {
     setDebugEnabled(sessionStorage.getItem('mojong:debug') === '1');
   }, []);
 
-  // Tear down on unmount or route change.
+  // Tear down on unmount or route change. `leave()` no-ops once a
+  // networked game has started, so navigating to `/play` does NOT
+  // close the DataChannel — Step 17's gameplay traffic flows over
+  // the same peer.
   useEffect(() => {
     return () => {
       leave();
     };
   }, [leave]);
+
+  // Whenever a START has been applied (host: locally; joiner:
+  // received over the wire), bounce to /play. This is a single
+  // effect so both peers go through the exact same code path.
+  useEffect(() => {
+    if (gameStarted) {
+      router.push('/play');
+    }
+  }, [gameStarted, router]);
 
   const isBusy =
     status === 'hosting' ||
@@ -100,6 +118,13 @@ export function NetworkLobby(): React.ReactElement {
 
   function handleJoin(): void {
     void join(joinInput, selfProfile);
+  }
+
+  function handleStart(): void {
+    // Host-only. The store sends `START` to the joiner, applies it
+    // locally, then flips `gameStarted` — the effect above handles
+    // the navigation for both sides.
+    startNetworkGame(options, selfProfile);
   }
 
   function handleCopy(): void {
@@ -158,8 +183,13 @@ export function NetworkLobby(): React.ReactElement {
         </div>
         <button
           className={`${styles.button} ${styles.primary}`}
-          disabled
-          title="Wired in the next step"
+          onClick={handleStart}
+          disabled={role !== 'host'}
+          title={
+            role === 'host'
+              ? 'Start the game on both devices'
+              : 'Waiting for host to start the game…'
+          }
         >
           Start Game
         </button>

@@ -32,6 +32,7 @@ import { fetchIceServers } from '../net/iceServers';
 import { connectViaSignaling, createPeer, type Peer } from '../net/peer';
 import {
   PROTOCOL_VERSION,
+  type GameOptions,
   type NetMessage,
   type Profile,
 } from '../net/protocol';
@@ -41,6 +42,7 @@ import {
   type Role,
   type SignalingClient,
 } from '../net/signaling';
+import { useGameStore } from './gameStore';
 
 // ── Public state shape ────────────────────────────────────────
 
@@ -67,8 +69,28 @@ export interface NetState {
   status: NetStatus;
   /** 6-char invitation code once allocated/joined. */
   code: string | null;
-  /** Which role this client plays in the session. */
+  /** Which role this client plays in the session (transport-level). */
   role: Role | null;
+  /**
+   * Lobby-level mode mirror of `role`. Plan-spec field name; kept
+   * alongside `role` so callers (UI / game wiring) can read either.
+   *   'host' → this device created the session.
+   *   'join' → this device joined an existing one.
+   */
+  mode: 'host' | 'join' | null;
+  /**
+   * Which `players[]` slot this device controls once a networked
+   * game starts. Populated by `startNetworkGame()` on the host and
+   * by the inbound `START` handler on the joiner. Null until then.
+   */
+  localPlayerIndex: 0 | 1 | null;
+  /**
+   * Flips to `true` the moment a `START` has been applied locally.
+   * The lobby observes this and navigates to `/play`. The peer is
+   * deliberately NOT torn down by `leave()` while this is true so
+   * the DataChannel survives the route change for Step 17's moves.
+   */
+  gameStarted: boolean;
   /** Peer's profile, populated after their HELLO arrives. */
   peerProfile: Profile | null;
   /** Human-readable error text, valid only when status === 'error'. */
@@ -100,8 +122,38 @@ export interface NetState {
    * Tear down peer + signaling client, reset the store back to
    * `'idle'`. Idempotent — safe to call from `useEffect` cleanup
    * even if nothing was ever started.
+   *
+   * No-op once `gameStarted === true`: the peer must survive the
+   * navigation from `/network` to `/play` so Step 17's gameplay
+   * messages can flow over the same DataChannel. Use
+   * `endNetworkSession()` to force teardown after the game ends.
    */
   leave: () => void;
+
+  /**
+   * Host-only: build the initial game from the local settings +
+   * exchanged profiles, broadcast `START`, then start the game
+   * locally. Caller is responsible for the route push (`/play`).
+   *
+   * Inputs : `options` from `useSettingsStore`, `selfProfile` from
+   *          `useProfileStore.player1`. The peer's profile is read
+   *          from store state (`peerProfile`, set by HELLO).
+   * Outputs: `true` on success, `false` if preconditions are missing
+   *          (no peer, no peerProfile, wrong status).
+   * Side fx: sends `START` over the DataChannel; mutates `useGameStore`;
+   *          flips `gameStarted` so the lobby UI navigates.
+   */
+  startNetworkGame: (
+    options: GameOptions,
+    selfProfile: Profile,
+  ) => boolean;
+
+  /**
+   * Force teardown of the peer + signaling client, regardless of
+   * `gameStarted`. Call this when the game ends (Step 19/20 wire
+   * this in; Step 16 just exposes the seam).
+   */
+  endNetworkSession: () => void;
 }
 
 /** Invitation code shape (matches the server's regex). */
@@ -123,6 +175,13 @@ export function normaliseNetCode(input: string): string | null {
 
 let currentPeer: Peer | null = null;
 let currentClient: SignalingClient | null = null;
+/**
+ * Per-tab outgoing sequence cursor for messages this device sends
+ * over the DataChannel. HELLO claims `seq: 0`; everything after
+ * (START, future ACTION/PING) draws from this counter so receivers
+ * can detect gaps. Reset alongside the peer in `teardown()`.
+ */
+let outgoingSeq = 1;
 /** Guards re-entrant `host()` / `join()` calls. */
 let inFlight = false;
 
@@ -250,6 +309,33 @@ export const useNetStore = create<NetState>((set, get) => {
     await connectViaSignaling(peer, client, role, logger);
     const peerProfile = await helloPromise;
     set({ status: 'connected', peerProfile });
+
+    // Long-lived listener for post-HELLO traffic. In Step 16 the
+    // only verb we handle is `START` (joiner side); Step 17 will
+    // add `ACTION` and friends here. We deliberately keep this
+    // subscription alive for the lifetime of the peer so it
+    // survives the `/network` → `/play` navigation.
+    peer.on('message', (msg) => {
+      if (msg.type === 'START') {
+        // Only the joiner reacts — the host applied START locally
+        // before sending it (in `startNetworkGame`).
+        if (get().role !== 'joiner') return;
+        const localPlayerIndex: 0 | 1 =
+          msg.hostPlayerIndex === 0 ? 1 : 0;
+        try {
+          useGameStore.getState().startGame({
+            options: msg.options,
+            profiles: msg.profiles,
+            seed: msg.seed,
+          });
+        } catch (err) {
+          logger.log('error', 'start.apply', String(err));
+          set({ status: 'error', error: 'Failed to start game.' });
+          return;
+        }
+        set({ localPlayerIndex, gameStarted: true });
+      }
+    });
   }
 
   /**
@@ -295,6 +381,7 @@ export const useNetStore = create<NetState>((set, get) => {
     }
     currentPeer = null;
     currentClient = null;
+    outgoingSeq = 1;
     inFlight = false;
   }
 
@@ -302,6 +389,9 @@ export const useNetStore = create<NetState>((set, get) => {
     status: 'idle',
     code: null,
     role: null,
+    mode: null,
+    localPlayerIndex: null,
+    gameStarted: false,
     peerProfile: null,
     error: null,
     logs: [],
@@ -316,6 +406,9 @@ export const useNetStore = create<NetState>((set, get) => {
         status: 'idle',
         code: null,
         role: 'host',
+        mode: 'host',
+        localPlayerIndex: null,
+        gameStarted: false,
         peerProfile: null,
         error: null,
         logs: [],
@@ -348,6 +441,9 @@ export const useNetStore = create<NetState>((set, get) => {
         status: 'joining',
         code,
         role: 'joiner',
+        mode: 'join',
+        localPlayerIndex: null,
+        gameStarted: false,
         peerProfile: null,
         error: null,
         logs: [],
@@ -367,6 +463,10 @@ export const useNetStore = create<NetState>((set, get) => {
     },
 
     leave() {
+      // Step 16: once a networked game has started, the peer must
+      // outlive the lobby route. Skip teardown so `/play` keeps
+      // sending and receiving on the same DataChannel.
+      if (get().gameStarted) return;
       teardown();
       // Don't wipe `error` immediately if we're in the error state
       // and the caller is just navigating — let the UI decide.
@@ -377,6 +477,9 @@ export const useNetStore = create<NetState>((set, get) => {
         status: 'idle',
         code: null,
         role: null,
+        mode: null,
+        localPlayerIndex: null,
+        gameStarted: false,
         peerProfile: null,
         error: wasError ? get().error : null,
       });
@@ -384,6 +487,73 @@ export const useNetStore = create<NetState>((set, get) => {
       // the `wasError` branch above is defensive in case future
       // callers want to inspect it after teardown.
       set({ error: null });
+    },
+
+    startNetworkGame(options, selfProfile) {
+      const s = get();
+      if (
+        s.status !== 'connected' ||
+        s.role !== 'host' ||
+        !s.peerProfile ||
+        !currentPeer
+      ) {
+        return false;
+      }
+      // Host owns player1 (index 0) in v1 (per IMPLEMENTATION_PLAN
+      // Step 16). The seed makes `gameId` deterministic so a
+      // JSON.stringify of both sides' GameState is identical.
+      const profiles: [Profile, Profile] = [selfProfile, s.peerProfile];
+      const seed =
+        typeof crypto !== 'undefined' &&
+        typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `${Date.now().toString(36)}-${Math.random()
+              .toString(36)
+              .slice(2, 10)}`;
+
+      const startMsg: NetMessage = {
+        v: PROTOCOL_VERSION,
+        gameId: s.code ?? '',
+        senderId: getDeviceId(),
+        seq: outgoingSeq++,
+        t: Date.now(),
+        type: 'START',
+        options,
+        profiles,
+        hostPlayerIndex: 0,
+        seed,
+      };
+
+      try {
+        currentPeer.send(startMsg);
+      } catch (err) {
+        set({ status: 'error', error: `Failed to start: ${String(err)}` });
+        return false;
+      }
+
+      try {
+        useGameStore.getState().startGame({ options, profiles, seed });
+      } catch (err) {
+        set({ status: 'error', error: `Failed to start: ${String(err)}` });
+        return false;
+      }
+
+      set({ localPlayerIndex: 0, gameStarted: true });
+      return true;
+    },
+
+    endNetworkSession() {
+      teardown();
+      set({
+        status: 'idle',
+        code: null,
+        role: null,
+        mode: null,
+        localPlayerIndex: null,
+        gameStarted: false,
+        peerProfile: null,
+        error: null,
+      });
     },
   };
 });

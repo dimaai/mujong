@@ -46,17 +46,22 @@
   min-width: 0;
   height: 100%;
   padding: 0 8px;
+  /* Horizontal swipe-to-scroll if the roster is wider than the panel.
+     Both axes must be set explicitly: when only `overflow-x` is `auto`
+     and `overflow-y` is left at `visible`, browsers promote `overflow-y`
+     to `auto` too — producing the unwanted vertical scrollbar we hit
+     on Player 2. Pinning Y to `hidden` keeps scrolling 1-D. */
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: thin;
+  /* Hide the chrome on every engine: Firefox, IE/Edge, then WebKit
+     via `::-webkit-scrollbar` below. The container is still
+     scrollable via touch / wheel / arrow keys. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
 .figuresArea::-webkit-scrollbar {
-  height: 4px;
-}
-.figuresArea::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 2px;
+  display: none;
 }
 
 /* ── Sandwich-menu separator + hamburger ───────────── */
@@ -115,7 +120,18 @@
   gap: 3px;
   flex: 1;
   min-width: 0;
+  /* See `.figuresArea` above — same `overflow-x: auto` +
+     `overflow-y: hidden` rule applies to the minimized variant.
+     Without the explicit `hidden` on Y, browsers were rendering
+     a vertical scrollbar on the right edge of the panel. */
   overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.figuresRow::-webkit-scrollbar {
+  display: none;
 }
 
 /* Gold pulse when this minimized panel is a winning-move target */

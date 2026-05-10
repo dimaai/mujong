@@ -155,12 +155,14 @@ interface GameStore {
    *                        (difficulty, boardSizeId, timer, againstView, walls)
    * @param args.profiles - tuple `[player1Profile, player2Profile]` from
    *                        `useProfileStore` (name + color)
+   * @param args.seed     - (Step 16) optional shared seed used to derive
+   *                        `gameId` deterministically so a host + joiner
+   *                        produce byte-identical `GameState`. Future RNG
+   *                        (e.g. randomised wall layouts) will key off it too.
    *
    * Side effects: replaces the current `game` with a fresh `GameState`.
-   * Note: `walls` is read but not yet honoured by the rules engine
-   * (lands in Step 8); `timerMinutes` seeds `playerTimers` only.
    */
-  startGame: (args: { options: GameOptions; profiles: [Profile, Profile] }) => void;
+  startGame: (args: { options: GameOptions; profiles: [Profile, Profile]; seed?: string }) => void;
 
   /**
    * Selects a PLACED figure on the board and computes its legal moves.
@@ -233,7 +235,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   selectedInstanceId: null,
   validMoveTargets: [],
 
-  startGame: ({ options, profiles }) => {
+  startGame: ({ options, profiles, seed }) => {
     // Resolve the named board-size preset to concrete dimensions.
     // Falls back to 'medium' if a stale id ever lands here so the
     // game still starts rather than crashing.
@@ -287,7 +289,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const timerSeconds = options.timerMinutes * 60;
 
     const newGame: GameState = {
-      gameId: `game_${Date.now()}`,
+      // Deterministic when `seed` is supplied so a networked host +
+      // joiner end up with byte-identical state (Step 16).
+      gameId: seed ? `game_${seed}` : `game_${Date.now()}`,
       level,
       players: [player1, player2],
       currentPlayerIndex: 0, // Player 1 always goes first

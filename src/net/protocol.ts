@@ -20,7 +20,15 @@
 //        "validate inputs at boundaries").
 // ============================================================
 
-import type { Profile, TurnAction, Position } from '../domain/types';
+import type {
+  Profile,
+  TurnAction,
+  Position,
+  GameOptions,
+  Difficulty,
+} from '../domain/types';
+
+const DIFFICULTIES: readonly Difficulty[] = ['beginner', 'normal', 'advanced'];
 
 // ── Versioning ────────────────────────────────────────────────
 
@@ -74,6 +82,19 @@ export type ByeReason = (typeof BYE_REASONS)[number];
  */
 export type NetMessage =
   | (NetEnvelope & { type: 'HELLO'; profile: Profile })
+  | (NetEnvelope & {
+      type: 'START';
+      options: GameOptions;
+      profiles: [Profile, Profile];
+      hostPlayerIndex: 0 | 1;
+      /**
+       * Optional shared seed so any future RNG (e.g. randomised
+       * wall layouts) produces identical results on both peers.
+       * In v1 the only consumer is `gameStore.startGame`, which
+       * uses it to make `gameId` deterministic across both sides.
+       */
+      seed?: string;
+    })
   | (NetEnvelope & {
       type: 'ACTION';
       action: TurnAction;
@@ -175,6 +196,9 @@ export function decode(raw: string): NetMessage {
     case 'HELLO':
       validateProfile((parsed as { profile: unknown }).profile);
       return ok(parsed);
+    case 'START':
+      validateStart(parsed);
+      return ok(parsed);
     case 'ACTION':
       validateTurnAction((parsed as { action: unknown }).action);
       requireNumber(parsed, 'turnNumber');
@@ -251,6 +275,41 @@ function validateProfile(p: unknown): void {
   requireString(p, 'color');
 }
 
+function validateGameOptions(o: unknown): void {
+  if (!isObject(o)) {
+    throw new NetProtocolError('START.options must be an object');
+  }
+  const diff = (o as { difficulty: unknown }).difficulty;
+  if (typeof diff !== 'string' || !DIFFICULTIES.includes(diff as Difficulty)) {
+    throw new NetProtocolError(`START.options.difficulty invalid: ${String(diff)}`);
+  }
+  requireString(o, 'boardSizeId');
+  requireNumber(o, 'timerMinutes');
+  if (typeof (o as { againstView: unknown }).againstView !== 'boolean') {
+    throw new NetProtocolError('START.options.againstView must be boolean');
+  }
+  if (typeof (o as { walls: unknown }).walls !== 'boolean') {
+    throw new NetProtocolError('START.options.walls must be boolean');
+  }
+}
+
+function validateStart(obj: unknown): void {
+  const m = obj as Record<string, unknown>;
+  validateGameOptions(m.options);
+  const profiles = m.profiles;
+  if (!Array.isArray(profiles) || profiles.length !== 2) {
+    throw new NetProtocolError('START.profiles must be a tuple of two profiles');
+  }
+  profiles.forEach(validateProfile);
+  const idx = m.hostPlayerIndex;
+  if (idx !== 0 && idx !== 1) {
+    throw new NetProtocolError('START.hostPlayerIndex must be 0 or 1');
+  }
+  if (m.seed !== undefined && (typeof m.seed !== 'string' || m.seed.length === 0)) {
+    throw new NetProtocolError('START.seed, when present, must be a non-empty string');
+  }
+}
+
 function validatePosition(p: unknown): void {
   if (!isObject(p)) {
     throw new NetProtocolError('position must be an object');
@@ -287,4 +346,4 @@ function validateTurnAction(a: unknown): void {
 
 // Re-export domain types referenced in NetMessage so consumers can
 // import everything from `src/net/protocol` without crossing layers.
-export type { Profile, TurnAction, Position };
+export type { Profile, TurnAction, Position, GameOptions };
