@@ -33,7 +33,6 @@ import {
   TableClient,
   TableServiceClient,
   RestError,
-  odata,
   type TableEntity,
   type TableEntityResult,
 } from '@azure/data-tables';
@@ -331,7 +330,11 @@ export function createTableStore(
 
   async function prune(beforeMs: number): Promise<number> {
     const c = await client();
-    const filter = odata`PartitionKey eq ${PARTITION} and createdAt lt ${beforeMs}`;
+    // Table Storage's OData parser treats bare integers as Edm.Int32.
+    // Our timestamps are JS milliseconds (~1.7e12) which overflow
+    // Int32, so we must append the `L` suffix to force Edm.Int64.
+    // The `odata` template tag doesn't add the suffix for us.
+    const filter = `PartitionKey eq '${PARTITION}' and createdAt lt ${beforeMs}L`;
     let removed = 0;
     // queryEntities is async-iterable; we cap the per-call work
     // because this runs on every request. A single page (default
