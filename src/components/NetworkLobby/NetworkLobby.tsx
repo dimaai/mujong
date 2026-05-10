@@ -30,6 +30,7 @@ import {
   type NetState,
 } from '../../store/netStore';
 import { useProfileStore } from '../../store/profileStore';
+import type { LogEntry } from '../../net/log';
 
 import styles from './NetworkLobby.module.css';
 
@@ -48,18 +49,15 @@ export function NetworkLobby(): React.ReactElement {
   const role = useNetStore((s: NetState) => s.role);
   const peerProfile = useNetStore((s: NetState) => s.peerProfile);
   const error = useNetStore((s: NetState) => s.error);
+  const logs = useNetStore((s: NetState) => s.logs);
   const host = useNetStore((s: NetState) => s.host);
   const join = useNetStore((s: NetState) => s.join);
   const leave = useNetStore((s: NetState) => s.leave);
 
-  // Profiles for our HELLO. We use `player1` as the "self" profile
-  // because there's only one device per side in network mode —
-  // there is no second local seat. (The settings flow that picks
-  // which slot represents the local player will land with the game
-  // wiring; for the lobby Player 1 is a sensible default.)
   const selfProfile = useProfileStore((s) => s.player1);
 
   const [joinInput, setJoinInput] = useState('');
+  const [showDebug, setShowDebug] = useState(false);
 
   // Tear down on unmount or route change.
   useEffect(() => {
@@ -100,112 +98,98 @@ export function NetworkLobby(): React.ReactElement {
 
   // ── Render branches ────────────────────────────────────────
 
+  // Each branch returns the card. The shared wrapper at the end
+  // mounts the debug panel below it so a tester can see logs on
+  // any branch without us repeating the markup five times.
+  let card: React.ReactElement;
+
   // Error state: explicit, with a "Try again" path.
   if (status === 'error') {
-    return (
-      <main className={styles.wrapper}>
-        <div className={styles.card}>
-          <h1 className={styles.title}>Network Game</h1>
-          <p className={styles.error}>{error ?? 'Unknown error.'}</p>
-          <div className={styles.actionsRow}>
-            <button className={styles.button} onClick={handleBack}>
-              Back to menu
-            </button>
-            <button
-              className={`${styles.button} ${styles.primary}`}
-              onClick={handleTryAgain}
-            >
-              Try again
-            </button>
-          </div>
-        </div>
-      </main>
-    );
-  }
-
-  // Connected state: both player cards + disabled Start.
-  if (status === 'connected' && peerProfile) {
-    // Render in a stable left-to-right order: this client first.
-    const leftLabel = role === 'host' ? 'You (Host)' : 'You (Joiner)';
-    const rightLabel = role === 'host' ? 'Joiner' : 'Host';
-    return (
-      <main className={styles.wrapper}>
-        <div className={styles.card}>
-          <h1 className={styles.title}>Connected</h1>
-          {code && <p className={styles.subtitle}>Session {code}</p>}
-          <div className={styles.players}>
-            <PlayerCard label={leftLabel} profile={selfProfile} />
-            <span className={styles.vs}>vs</span>
-            <PlayerCard label={rightLabel} profile={peerProfile} />
-          </div>
+    card = (
+      <div className={styles.card}>
+        <h1 className={styles.title}>Network Game</h1>
+        <p className={styles.error}>{error ?? 'Unknown error.'}</p>
+        <div className={styles.actionsRow}>
+          <button className={styles.button} onClick={handleBack}>
+            Back to menu
+          </button>
           <button
             className={`${styles.button} ${styles.primary}`}
-            disabled
-            title="Wired in the next step"
+            onClick={handleTryAgain}
           >
-            Start Game
+            Try again
           </button>
-          <div className={styles.actionsRow}>
-            <button className={styles.button} onClick={handleBack}>
-              Leave
-            </button>
-          </div>
         </div>
-      </main>
+      </div>
     );
-  }
-
-  // Hosting state: show the code prominently.
-  if (status === 'hosting' && code) {
-    return (
-      <main className={styles.wrapper}>
-        <div className={styles.card}>
-          <h1 className={styles.title}>Share this code</h1>
-          <p className={styles.codeBig}>{code}</p>
-          <div className={styles.actionsRow}>
-            <button className={styles.button} onClick={handleCopy}>
-              Copy code
-            </button>
-            <button className={styles.button} onClick={handleBack}>
-              Cancel
-            </button>
-          </div>
-          <div className={styles.spinnerRow}>
-            <span className={styles.spinner} aria-hidden />
-            <span>Waiting for opponent…</span>
-          </div>
+  } else if (status === 'connected' && peerProfile) {
+    // Connected state: both player cards + disabled Start.
+    const leftLabel = role === 'host' ? 'You (Host)' : 'You (Joiner)';
+    const rightLabel = role === 'host' ? 'Joiner' : 'Host';
+    card = (
+      <div className={styles.card}>
+        <h1 className={styles.title}>Connected</h1>
+        {code && <p className={styles.subtitle}>Session {code}</p>}
+        <div className={styles.players}>
+          <PlayerCard label={leftLabel} profile={selfProfile} />
+          <span className={styles.vs}>vs</span>
+          <PlayerCard label={rightLabel} profile={peerProfile} />
         </div>
-      </main>
-    );
-  }
-
-  // Joining / connecting state: spinner only.
-  if (status === 'joining' || status === 'connecting') {
-    return (
-      <main className={styles.wrapper}>
-        <div className={styles.card}>
-          <h1 className={styles.title}>Connecting</h1>
-          {code && <p className={styles.subtitle}>Session {code}</p>}
-          <div className={styles.spinnerRow}>
-            <span className={styles.spinner} aria-hidden />
-            <span>
-              {status === 'joining' ? 'Joining…' : 'Connecting…'}
-            </span>
-          </div>
-          <div className={styles.actionsRow}>
-            <button className={styles.button} onClick={handleBack}>
-              Cancel
-            </button>
-          </div>
+        <button
+          className={`${styles.button} ${styles.primary}`}
+          disabled
+          title="Wired in the next step"
+        >
+          Start Game
+        </button>
+        <div className={styles.actionsRow}>
+          <button className={styles.button} onClick={handleBack}>
+            Leave
+          </button>
         </div>
-      </main>
+      </div>
     );
-  }
-
-  // Default (idle): pick host or join.
-  const joinValid = normaliseNetCode(joinInput) !== null;
-  return (
-    <main className={styles.wrapper}>
+  } else if (status === 'hosting' && code) {
+    // Hosting state: show the code prominently.
+    card = (
+      <div className={styles.card}>
+        <h1 className={styles.title}>Share this code</h1>
+        <p className={styles.codeBig}>{code}</p>
+        <div className={styles.actionsRow}>
+          <button className={styles.button} onClick={handleCopy}>
+            Copy code
+          </button>
+          <button className={styles.button} onClick={handleBack}>
+            Cancel
+          </button>
+        </div>
+        <div className={styles.spinnerRow}>
+          <span className={styles.spinner} aria-hidden />
+          <span>Waiting for opponent…</span>
+        </div>
+      </div>
+    );
+  } else if (status === 'joining' || status === 'connecting') {
+    // Joining / connecting state: spinner only.
+    card = (
+      <div className={styles.card}>
+        <h1 className={styles.title}>Connecting</h1>
+        {code && <p className={styles.subtitle}>Session {code}</p>}
+        <div className={styles.spinnerRow}>
+          <span className={styles.spinner} aria-hidden />
+          <span>{status === 'joining' ? 'Joining…' : 'Connecting…'}</span>
+        </div>
+        <div className={styles.actionsRow}>
+          <button className={styles.button} onClick={handleBack}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  } else {
+    // Default (idle): pick host or join.
+    const joinValid = normaliseNetCode(joinInput) !== null;
+    card = (
       <div className={styles.card}>
         <h1 className={styles.title}>Network Game</h1>
         <p className={styles.subtitle}>
@@ -234,8 +218,6 @@ export function NetworkLobby(): React.ReactElement {
             className={styles.button}
             onClick={handleJoin}
             disabled={isBusy || !joinValid}
-            // Tooltip helps explain why the button is disabled
-            // before the user has typed all 6 chars.
             title={
               joinValid
                 ? 'Join this session'
@@ -251,6 +233,17 @@ export function NetworkLobby(): React.ReactElement {
           </button>
         </div>
       </div>
+    );
+  }
+
+  return (
+    <main className={styles.wrapper}>
+      {card}
+      <DebugPanel
+        logs={logs}
+        open={showDebug}
+        onToggle={() => setShowDebug((v) => !v)}
+      />
     </main>
   );
 }
@@ -275,4 +268,69 @@ function PlayerCard({
       <div className={styles.playerLabel}>{label}</div>
     </div>
   );
+}
+
+/**
+ * Collapsible on-screen mirror of the net-layer ring buffer.
+ * Useful on mobile installs where DevTools is out of reach.
+ *
+ * Inputs : `logs` array (already capped by the ring buffer),
+ *          `open` toggle state, `onToggle` callback.
+ * Outputs: a button + (when open) a scrollable monospace panel.
+ */
+function DebugPanel({
+  logs,
+  open,
+  onToggle,
+}: {
+  logs: LogEntry[];
+  open: boolean;
+  onToggle: () => void;
+}): React.ReactElement {
+  return (
+    <div style={{ width: '100%', maxWidth: 420 }}>
+      <button className={styles.debugToggle} onClick={onToggle}>
+        {open ? 'Hide debug log' : `Show debug log (${logs.length})`}
+      </button>
+      {open && (
+        <div className={styles.debugPanel} role="log" aria-live="polite">
+          {logs.length === 0 ? (
+            <div className={styles.debugRow}>(no log entries yet)</div>
+          ) : (
+            logs.map((e, i) => {
+              const levelClass =
+                e.level === 'error'
+                  ? styles.debugLevelError
+                  : e.level === 'warn'
+                    ? styles.debugLevelWarn
+                    : e.level === 'info'
+                      ? styles.debugLevelInfo
+                      : styles.debugLevelDebug;
+              const time = new Date(e.ts).toLocaleTimeString();
+              const data =
+                e.data === undefined ? '' : ' ' + safeStringify(e.data);
+              return (
+                <div key={i} className={`${styles.debugRow} ${levelClass}`}>
+                  {time} [{e.tag}] {data}
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * JSON.stringify but tolerant of cyclic refs and BigInts. We do
+ * not control what `data` shapes the net layer logs, so this
+ * keeps the overlay from crashing on edge cases.
+ */
+function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }

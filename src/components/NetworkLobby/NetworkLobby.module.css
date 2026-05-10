@@ -92,10 +92,17 @@
   display: flex;
   gap: 8px;
   align-items: stretch;
+  /* Without `min-width: 0` on a flex parent the centered input
+     keeps its content-driven width on narrow screens, pushing the
+     "Join" button beyond the card edge. */
+  min-width: 0;
 }
 
 .codeInput {
-  flex: 1;
+  flex: 1 1 0;
+  /* Same reason: allow the input to shrink below its preferred
+     width inside the row. */
+  min-width: 0;
   padding: 10px 12px;
   background: rgba(255, 255, 255, 0.07);
   border: 1px solid rgba(255, 255, 255, 0.15);
@@ -107,6 +114,51 @@
   letter-spacing: 4px;
   text-align: center;
 }
+
+.codeRow .button {
+  /* Keep the join button compact so it never wraps below or
+     overflows the card on narrow viewports. */
+  flex: 0 0 auto;
+}
+
+/* ── Debug overlay ───────────────────────────────────────────
+   On-card panel that mirrors the net-layer ring buffer so a
+   tester on mobile (no devtools) can read what's happening. */
+
+.debugToggle {
+  background: none;
+  border: none;
+  color: #b8a8d4;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 0;
+  text-align: left;
+  text-decoration: underline;
+}
+
+.debugPanel {
+  max-height: 220px;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 8px;
+  font-family: ui-monospace, "Cascadia Code", Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #cfcfe6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.debugRow {
+  margin-bottom: 4px;
+}
+
+.debugLevelDebug { color: #8aa9c9; }
+.debugLevelInfo  { color: #cde0ff; }
+.debugLevelWarn  { color: #ffd58a; }
+.debugLevelError { color: #ff9c9c; }
 
 .spinnerRow {
   display: flex;

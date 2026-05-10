@@ -27,7 +27,7 @@
 import { create } from 'zustand';
 
 import { getDeviceId } from '../persistence/ids';
-import { createNetLogger } from '../net/log';
+import { createNetLogger, type LogEntry } from '../net/log';
 import { connectViaSignaling, createPeer, type Peer } from '../net/peer';
 import {
   PROTOCOL_VERSION,
@@ -72,6 +72,14 @@ export interface NetState {
   peerProfile: Profile | null;
   /** Human-readable error text, valid only when status === 'error'. */
   error: string | null;
+
+  /**
+   * Recent diagnostic log entries from the net layer (peer +
+   * signaling). Bounded by the ring buffer's capacity. Updated
+   * via `set` so React components can subscribe and render a
+   * debug overlay on devices without easy DevTools access.
+   */
+  logs: LogEntry[];
 
   /**
    * Start hosting. Allocates a session, advertises the code,
@@ -159,6 +167,7 @@ export const useNetStore = create<NetState>((set, get) => {
     const logger = {
       log(level: 'debug' | 'info' | 'warn' | 'error', tag: string, data?: unknown) {
         ringLogger.log(level, tag, data);
+        // Mirror to the browser console for devtools users.
         const fn =
           level === 'error'
             ? console.error
@@ -168,6 +177,9 @@ export const useNetStore = create<NetState>((set, get) => {
                 ? console.info
                 : console.debug;
         fn(`[mojong:${tag}]`, data ?? '');
+        // Mirror to the store so a UI overlay can render it on
+        // mobile devices that can't open devtools easily.
+        set({ logs: ringLogger.snapshot() });
       },
       snapshot: ringLogger.snapshot,
       clear: ringLogger.clear,
@@ -280,6 +292,7 @@ export const useNetStore = create<NetState>((set, get) => {
     role: null,
     peerProfile: null,
     error: null,
+    logs: [],
 
     async host(selfProfile) {
       if (inFlight) return;
@@ -293,6 +306,7 @@ export const useNetStore = create<NetState>((set, get) => {
         role: 'host',
         peerProfile: null,
         error: null,
+        logs: [],
       });
       const client = createSignalingClient();
       currentClient = client;
@@ -324,6 +338,7 @@ export const useNetStore = create<NetState>((set, get) => {
         role: 'joiner',
         peerProfile: null,
         error: null,
+        logs: [],
       });
       const client = createSignalingClient();
       currentClient = client;
