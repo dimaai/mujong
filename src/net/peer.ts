@@ -137,6 +137,21 @@ export interface CreatePeerOptions {
 /** DataChannel label is part of the wire contract. Both sides must agree. */
 export const DATA_CHANNEL_LABEL = 'mojong';
 
+// ── ICE server configuration ──────────────────────────────────
+
+/**
+ * Default fallback `iceServers` used only when the caller does
+ * not provide `rtcConfig`. STUN-only — covers most home networks
+ * but cannot punch through symmetric NAT. The full TURN list is
+ * fetched at runtime by `src/net/iceServers.ts` and passed in
+ * via `rtcConfig` so credentials never live in the client bundle.
+ */
+const DEFAULT_STUN_FALLBACK: RTCIceServer[] = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun.cloudflare.com:3478' },
+];
+
 // ── Implementation ────────────────────────────────────────────
 
 /**
@@ -174,31 +189,12 @@ export function createPeer(options: CreatePeerOptions): Peer {
   const factory = rtcFactory ?? ((cfg) => new RTCPeerConnection(cfg));
   // Default ICE configuration:
   //   - Multiple public STUN servers for redundancy.
-  //   - Open Relay Project's free public TURN servers as a
-  //     fallback for symmetric-NAT networks (corporate Wi-Fi,
-  //     mobile CGNAT) where STUN alone can't traverse.
+  // The full TURN list (with credentials) is supplied by the
+  // caller via `rtcConfig` after fetching it from the API at
+  // runtime, so credentials never live in the client bundle.
   // Caller can override entirely or pass `{}` to opt out.
   const effectiveConfig: RTCConfiguration = rtcConfig ?? {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun.cloudflare.com:3478' },
-      {
-        urls: 'turn:openrelay.metered.ca:80',
-        username: 'openrelayproject',
-        credential: 'openrelayproject',
-      },
-      {
-        urls: 'turn:openrelay.metered.ca:443',
-        username: 'openrelayproject',
-        credential: 'openrelayproject',
-      },
-      {
-        urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-        username: 'openrelayproject',
-        credential: 'openrelayproject',
-      },
-    ],
+    iceServers: DEFAULT_STUN_FALLBACK,
   };
   const pc = factory(effectiveConfig);
 

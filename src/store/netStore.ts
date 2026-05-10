@@ -28,6 +28,7 @@ import { create } from 'zustand';
 
 import { getDeviceId } from '../persistence/ids';
 import { createNetLogger, type LogEntry } from '../net/log';
+import { fetchIceServers } from '../net/iceServers';
 import { connectViaSignaling, createPeer, type Peer } from '../net/peer';
 import {
   PROTOCOL_VERSION,
@@ -186,7 +187,18 @@ export const useNetStore = create<NetState>((set, get) => {
       size: ringLogger.size,
     };
 
-    const peer = createPeer({ role, logger });
+    // Fetch a fresh iceServers list from the API. The provider's
+    // long-lived API key lives only in the Function App env, so
+    // the client never sees it. We tolerate failures by falling
+    // back to STUN-only — symmetric-NAT users will fail later,
+    // but home users on direct IPs still get a working session.
+    const { iceServers, fellBack } = await fetchIceServers();
+    logger.log('info', 'iceServers', {
+      count: iceServers.length,
+      fellBack,
+    });
+
+    const peer = createPeer({ role, logger, rtcConfig: { iceServers } });
     currentPeer = peer;
 
     // Resolve once the peer's HELLO is decoded; reject on terminal
