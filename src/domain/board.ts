@@ -123,8 +123,11 @@ export function createInitialFigures(
     const player = players[playerIndex];
     for (const allowed of allowedFigures) {
       for (let i = 0; i < allowed.quantity; i++) {
+        // Deterministic id: identical across peers in a network game
+        // so PLACE/MOVE actions referencing this id resolve on both
+        // sides. Uniqueness is guaranteed by (playerId, figureTypeId, i).
         instances.push({
-          instanceId: generateInstanceId(),
+          instanceId: `${player.id}__${allowed.figureTypeId}__${i}`,
           figureTypeId: allowed.figureTypeId,
           skinId: skinMap[allowed.figureTypeId] ?? 'skin_default_blue',
           playerId: player.id,
