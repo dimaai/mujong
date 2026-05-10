@@ -184,12 +184,7 @@ export function NetworkLobby(): React.ReactElement {
         <button
           className={`${styles.button} ${styles.primary}`}
           onClick={handleStart}
-          disabled={role !== 'host'}
-          title={
-            role === 'host'
-              ? 'Start the game on both devices'
-              : 'Waiting for host to start the game…'
-          }
+          title="Start the game on both devices"
         >
           Start Game
         </button>

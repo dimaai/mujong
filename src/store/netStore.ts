@@ -311,15 +311,17 @@ export const useNetStore = create<NetState>((set, get) => {
     set({ status: 'connected', peerProfile });
 
     // Long-lived listener for post-HELLO traffic. In Step 16 the
-    // only verb we handle is `START` (joiner side); Step 17 will
-    // add `ACTION` and friends here. We deliberately keep this
-    // subscription alive for the lifetime of the peer so it
-    // survives the `/network` → `/play` navigation.
+    // verbs we handle are `START` (game-start sync) and `BYE`
+    // (opponent left the lobby); Step 17 will add `ACTION` and
+    // friends here. We deliberately keep this subscription alive
+    // for the lifetime of the peer so it survives the
+    // `/network` → `/play` navigation.
     peer.on('message', (msg) => {
       if (msg.type === 'START') {
-        // Only the joiner reacts — the host applied START locally
-        // before sending it (in `startNetworkGame`).
-        if (get().role !== 'joiner') return;
+        // The clicker (sender) becomes player 1 (index 0). The
+        // receiver picks the opposite slot. This lets either side
+        // initiate the game from the lobby — not just the host.
+        if (get().gameStarted) return; // race: we already started
         const localPlayerIndex: 0 | 1 =
           msg.hostPlayerIndex === 0 ? 1 : 0;
         try {
@@ -334,7 +336,49 @@ export const useNetStore = create<NetState>((set, get) => {
           return;
         }
         set({ localPlayerIndex, gameStarted: true });
+        return;
       }
+      if (msg.type === 'BYE') {
+        // Peer signalled a clean disconnect. If we haven't started
+        // a game yet, fall back to the lobby's error state so the
+        // user can retry. (Step 19 will handle in-game BYE.)
+        if (!get().gameStarted) {
+          teardown();
+          set({
+            status: 'error',
+            code: null,
+            role: null,
+            mode: null,
+            localPlayerIndex: null,
+            gameStarted: false,
+            peerProfile: null,
+            error: 'Opponent left the lobby.',
+          });
+        }
+        return;
+      }
+    });
+
+    // Long-lived state listener: if the channel drops *after* the
+    // handshake (peer closed their tab / network died) and we are
+    // still in the lobby, surface a friendly error so the other
+    // user isn't stranded on a "Connected" screen forever.
+    peer.on('state', (s) => {
+      if (s !== 'closed' && s !== 'failed') return;
+      if (get().gameStarted) return; // game-time disconnect: Step 19
+      // Don't clobber an existing error (e.g. from BYE handler).
+      if (get().status === 'error') return;
+      teardown();
+      set({
+        status: 'error',
+        code: null,
+        role: null,
+        mode: null,
+        localPlayerIndex: null,
+        gameStarted: false,
+        peerProfile: null,
+        error: 'Opponent disconnected.',
+      });
     });
   }
 
@@ -467,6 +511,26 @@ export const useNetStore = create<NetState>((set, get) => {
       // outlive the lobby route. Skip teardown so `/play` keeps
       // sending and receiving on the same DataChannel.
       if (get().gameStarted) return;
+      // Best-effort BYE so the other side immediately falls back to
+      // the lobby instead of waiting for the channel to time out.
+      // We catch and ignore: if the peer is already half-closed,
+      // `send` will throw and we still want to tear down locally.
+      const s0 = get();
+      if (currentPeer && (s0.status === 'connected' || s0.status === 'connecting')) {
+        try {
+          currentPeer.send({
+            v: PROTOCOL_VERSION,
+            gameId: s0.code ?? '',
+            senderId: getDeviceId(),
+            seq: outgoingSeq++,
+            t: Date.now(),
+            type: 'BYE',
+            reason: 'normal',
+          });
+        } catch {
+          // ignore — best effort
+        }
+      }
       teardown();
       // Don't wipe `error` immediately if we're in the error state
       // and the caller is just navigating — let the UI decide.
@@ -491,17 +555,18 @@ export const useNetStore = create<NetState>((set, get) => {
 
     startNetworkGame(options, selfProfile) {
       const s = get();
+      // Either side can start a networked game in v1: the clicker
+      // becomes player 1 (index 0) and the other peer becomes
+      // player 2. This keeps the lobby symmetric — no awkward
+      // "waiting for host to press a button" UX.
       if (
         s.status !== 'connected' ||
-        s.role !== 'host' ||
         !s.peerProfile ||
-        !currentPeer
+        !currentPeer ||
+        s.gameStarted // race-guard against a near-simultaneous remote START
       ) {
         return false;
       }
-      // Host owns player1 (index 0) in v1 (per IMPLEMENTATION_PLAN
-      // Step 16). The seed makes `gameId` deterministic so a
-      // JSON.stringify of both sides' GameState is identical.
       const profiles: [Profile, Profile] = [selfProfile, s.peerProfile];
       const seed =
         typeof crypto !== 'undefined' &&
