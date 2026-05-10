@@ -369,6 +369,10 @@ export function GameCanvas() {
           // at the bottom — the top panel is the opponent's info and
           // must read right-side-up, so `againstView` doesn't apply.
           flipped={isNetwork ? false : againstView}
+          // Network mode: only the local player may issue actions
+          // (Give Up / Offer Draw). The top panel is the opponent's,
+          // so its menu is hidden to avoid "offering on their behalf".
+          showMenu={!isNetwork || topIndex === localPlayerIndex}
         />
 
         {/* Board row: timer bar | board + overlays | timer bar */}
@@ -506,8 +510,15 @@ export function GameCanvas() {
                         <button
                           className={styles.menuBtn}
                           onClick={() => {
-                            acceptDraw();
+                            // Send the response BEFORE mutating
+                            // local state — accepting flips phase
+                            // to 'draw', which the netStore phase
+                            // listener treats as game-over and
+                            // tears down the peer. If we sent the
+                            // DRAW_RESPONSE after, the channel
+                            // would already be closed.
                             if (isNetwork) sendDrawResponse(true);
+                            acceptDraw();
                           }}
                         >
                           Accept
@@ -515,8 +526,8 @@ export function GameCanvas() {
                         <button
                           className={styles.menuBtn}
                           onClick={() => {
-                            rejectDraw();
                             if (isNetwork) sendDrawResponse(false);
+                            rejectDraw();
                           }}
                         >
                           Decline
@@ -564,6 +575,7 @@ export function GameCanvas() {
           isPlaying={phase === 'playing'}
           winTargets={bottomPanelWinTargets}
           onWinClick={handleCellClick}
+          showMenu={!isNetwork || bottomIndex === localPlayerIndex}
         />
       </div>
     </div>

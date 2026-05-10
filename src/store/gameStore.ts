@@ -554,6 +554,21 @@ export const useGameStore = create<GameStore>((set, get) => ({
       action,
     };
 
+    // Broadcast BEFORE applying the local set(): the gameStore phase
+    // change triggers netStore listeners that can tear the peer
+    // down (on game-end). If we broadcast AFTER set, a winning
+    // ACTION can lose the race against a teardown-driven BYE and
+    // arrive after the channel is closed — leaving the opponent
+    // without the final move.
+    if (source === 'local' && mode === 'network' && actionBroadcaster) {
+      try {
+        actionBroadcaster(newEntry);
+      } catch {
+        // Transport failures don't roll back the local state — the
+        // peer will request a resync via Step 20 once it reconnects.
+      }
+    }
+
     set({
       game: {
         ...game,
@@ -574,18 +589,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
       validMoveTargets: [],
       actionLog: [...actionLog, newEntry],
     });
-
-    // Step 17: ship local moves over the wire. Remote-source
-    // actions deliberately skip this branch — re-broadcasting
-    // would cause an infinite ping-pong.
-    if (source === 'local' && mode === 'network' && actionBroadcaster) {
-      try {
-        actionBroadcaster(newEntry);
-      } catch {
-        // Transport failures don't roll back the local state — the
-        // peer will request a resync via Step 20 once it reconnects.
-      }
-    }
   },
 
   applyRemoteAction: ({ action, turnNumber }) => {

@@ -1161,7 +1161,22 @@ useGameStore.subscribe((state, prev) => {
   const net = useNetStore.getState();
   if (!net.gameStarted) return;
 
-  if (currentPeer) {
+  // The peer learns about the game ending one of three ways:
+  //   1. ACTION    — a winning move (or repetition draw); actionLog grew.
+  //   2. DRAW_RESPONSE — they accepted/were-told of an accepted offer.
+  //   3. BYE       — true forfeit / "Give Up", no other signal goes out.
+  // Only case 3 needs a BYE here. Sending BYE for cases 1 and 2 races
+  // the real signal: BYE arrives first, peer's handleRemoteAbort runs,
+  // and the peer ends up declared the winner regardless of what
+  // actually happened. We detect (1) via actionLog growth and (2) via
+  // a draw offer that was pending in `prev`.
+  const actionAdvanced =
+    state.actionLog.length > prev.actionLog.length;
+  const drawAccepted =
+    prev.game?.drawOfferFrom != null && state.game?.phase === 'draw';
+  const sendBye = !actionAdvanced && !drawAccepted;
+
+  if (sendBye && currentPeer) {
     try {
       currentPeer.send({
         v: PROTOCOL_VERSION,

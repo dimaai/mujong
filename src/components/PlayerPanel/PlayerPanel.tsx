@@ -49,6 +49,10 @@ interface PlayerPanelProps {
   winTargets: Position[];
   onWinClick: (pos: Position) => void;
   flipped?: boolean;
+  /** When false, the hamburger menu button is hidden. Used in
+   *  network mode to prevent the local user from issuing actions
+   *  on the opponent's behalf. Defaults to true. */
+  showMenu?: boolean;
 }
 
 // ── PlayerPanel component ─────────────────────────────────────
@@ -69,6 +73,7 @@ export function PlayerPanel({
   winTargets,
   onWinClick,
   flipped,
+  showMenu = true,
 }: PlayerPanelProps) {
   const myFigures = figures.filter((f) => f.playerId === playerId);
 
@@ -142,7 +147,7 @@ export function PlayerPanel({
           ))}
         </div>
 
-        {isPlaying && (
+        {isPlaying && showMenu && (
           <>
             <div className={styles.separator} />
             <button
