@@ -2,15 +2,11 @@
 // src/data/boardSizes.ts
 //
 // PURPOSE
-//   Three named board-dimension presets shown in the (future)
-//   Settings screen. Seeded from the existing LEVELS so the new
-//   `GameOptions.boardSizeId` path produces the same boards the
-//   current `Level`-based flow already produces.
+//   Three named board-dimension presets shown in the Settings
+//   screen. This file is the single source of truth for board
+//   sizes referenced by `GameOptions.boardSizeId`.
 //
 // READ ALONGSIDE
-//   - `src/data/levels.ts` — the legacy level data we're sourcing
-//     dimensions from. Once Phase C ships, `LEVELS` goes away and
-//     this file becomes the single source of truth for board sizes.
 //   - `src/domain/types.ts` — `BoardSizePreset` interface.
 // ============================================================
 
@@ -22,9 +18,9 @@ import type { BoardSizePreset } from '../domain/types';
  * Ids are kept short and stable — they are persisted inside
  * `GameOptions.boardSizeId` and migrated forward when needed.
  *
- *   small  → seeded from LEVELS[0] (Beginner) :  6 × 9
- *   medium → seeded from LEVELS[1] (Standard) :  8 × 10
- *   large  → seeded from LEVELS[2] (Advanced) :  6 × 11
+ *   small  : 6 × 7
+ *   medium : 6 × 9
+ *   large  : 7 × 11
  */
 export const BOARD_SIZES: BoardSizePreset[] = [
   { id: 'small',  label: 'S (6 × 7)',   width: 6, height: 7  },

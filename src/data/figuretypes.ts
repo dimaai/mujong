@@ -71,8 +71,7 @@ export const FIGURE_TYPE_MAP: Record<string, FigureType> = Object.fromEntries(
 // ── Difficulty → roster mapping (Step 7) ──────────────────────
 //
 // Each difficulty maps to a piece roster (`AllowedFigure[]`) that
-// each player receives at the start of a game. Replaces the
-// per-level `Level.allowedFigures` field used by the legacy flow.
+// each player receives at the start of a game.
 //
 // Rosters are tuned so that:
 //   - beginner  → fewer pieces and the simplest movers, easier to learn.

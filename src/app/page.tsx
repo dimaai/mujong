@@ -6,7 +6,7 @@
 // automatically becomes a route (no router config needed).
 //
 // This file is a Server Component — it runs on the server and
-// returns HTML. The GameSetup component it renders is a Client
+// returns HTML. The MainMenu component it renders is a Client
 // Component (marked 'use client') because it needs browser
 // interactivity (click handlers, useState, Zustand).
 //
@@ -30,8 +30,7 @@ import { MainMenu } from '../components/MainMenu/MainMenu';
  *   "/play"  → GameCanvas: the live board, only reachable when a
  *              game exists in the Zustand store.
  *
- * The legacy GameSetup component is intentionally left in place
- * (no longer imported) so it can be deleted cleanly in a follow-up.
+ * Step 23 removed the legacy GameSetup component entirely.
  */
 export default function HomePage() {
   return (

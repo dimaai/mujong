@@ -21,9 +21,8 @@
 //   without changes here.
 //
 // SCOPE NOTE
-//   No UI is wired in this step. `GameSetup` is untouched on
-//   purpose — Step 5 will introduce `MainMenu` which reads/writes
-//   this store.
+//   This store is read/written by `MainMenu` (Step 5+). The
+//   pre-Step-5 `GameSetup` component has since been removed.
 // ============================================================
 
 import { create } from 'zustand';

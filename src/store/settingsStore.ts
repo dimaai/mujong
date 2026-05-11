@@ -7,7 +7,8 @@
 //   `GameOptions` from `domain/types.ts`.
 //
 //   This is the Step 3 store — it exists in parallel to the legacy
-//   `Level`-based flow used by GameSetup. Nothing reads from it yet;
+//   `Level`-based flow that the (now-removed) `GameSetup` once drove.
+//   Nothing reads from it yet;
 //   the Settings screen (Phase B) and the new Start-Game wiring
 //   (Step 5+) will consume it later.
 //
@@ -21,7 +22,7 @@
 // MIGRATION
 //   `migrateLegacySettings()` runs once at module load and removes
 //   any pre-Step-3 `selectedLevelId` blob from storage, mapping it
-//   to sensible defaults if found. This is defensive — the current
+//   to sensible defaults if found. This is defensive — the original
 //   GameSetup never persisted that key — but cheap insurance for
 //   any test fixtures or older preview builds.
 // ============================================================
@@ -37,10 +38,10 @@ import { createEnvelopeStorage, getItem, removeItem } from '../persistence/stora
 
 // ── Defaults ──────────────────────────────────────────────────
 //
-// Chosen to match the *behaviour* of today's GameSetup so that the
-// moment Step 5 swaps the hard-coded LEVELS[1] for these options,
-// the visible game does not change:
-//   - LEVELS[1] is 8×10 → boardSizeId: 'medium'
+// Chosen to match the *behaviour* of the original GameSetup so that
+// when the start-game wiring swapped the hard-coded LEVELS[1] for
+// these options, the visible game did not change:
+//   - LEVELS[1] was 8×10 → boardSizeId: 'medium'
 //   - timerMinutes 5    → unchanged
 //   - againstView false → unchanged
 //   - walls false       → walls feature lands in Phase C

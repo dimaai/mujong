@@ -322,7 +322,7 @@ We use the existing Next.js App Router. Each route is a thin client component th
 
 ### 8.2 Component reuse
 
-- [GameSetup](src/components/GameSetup/GameSetup.tsx) is split: the form moves into a new `MainMenu` component, the game switch logic moves into `/play`. The current `againstView` / `timer` / `level` form fields move to the new `Settings` screen.
+- The legacy `GameSetup` component was split (and since removed): the form moved into [MainMenu](src/components/MainMenu/MainMenu.tsx), the game switch logic moved into `/play`, and `againstView` / `timer` / `level` form fields moved to the [Settings](src/components/Settings/Settings.tsx) screen.
 - [GameCanvas](src/components/GameCanvas/GameCanvas.tsx), [Board](src/components/Board/Board.tsx), [PlayerPanel](src/components/PlayerPanel/PlayerPanel.tsx), [FigurePanel](src/components/FigurePanel/FigurePanel.tsx) are unchanged in v1.
 
 ### 8.3 State flow per screen
