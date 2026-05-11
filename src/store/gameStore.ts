@@ -171,6 +171,25 @@ export function setActionBroadcaster(cb: ActionBroadcaster | null): void {
 }
 
 /**
+ * Cap on `actionLog` length. A real Mujong match is far shorter
+ * than this; the bound only protects us against pathological
+ * scenarios (long resync loops, future replay tooling). Trimming
+ * preserves the invariant that `entry[i+1].seq === entry[i].seq + 1`,
+ * but breaks the "seq === array index" shortcut, which is why
+ * `getActionsSince` uses a `findIndex` lookup instead of slicing
+ * by index.
+ */
+const ACTION_LOG_MAX = 200;
+
+function appendAndTrim(
+  log: ActionLogEntry[],
+  entry: ActionLogEntry,
+): ActionLogEntry[] {
+  const next = log.length < ACTION_LOG_MAX ? [...log, entry] : [...log.slice(1), entry];
+  return next;
+}
+
+/**
  * Everything the UI needs from the store, split into:
  *   - state   (data React reads)
  *   - actions (functions React calls to change state)
@@ -269,6 +288,20 @@ interface GameStore {
    *          mismatch (logged by the caller).
    */
   applyRemoteAction: (entry: { action: TurnAction; turnNumber: number }) => boolean;
+
+  /**
+   * Step 20: return the suffix of `actionLog` whose `seq` is `>=`
+   * the requested cursor. Used by `netStore` to answer a peer's
+   * `RESYNC_REQ` after a transient gap.
+   *
+   * Inputs : `seq` — first seq the requester wants (their
+   *          `expectedRemoteSeq`).
+   * Output : `ActionLogEntry[]` in seq order. Empty when caller is
+   *          already caught up. Returns whatever we have if the
+   *          requested seq is older than our trimmed window.
+   * Side fx: none.
+   */
+  getActionsSince: (seq: number) => ActionLogEntry[];
 
   /** Clears selection and valid-move highlights without changing game state. */
   resetSelection: () => void;
@@ -606,7 +639,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       },
       selectedInstanceId: null,
       validMoveTargets: [],
-      actionLog: [...actionLog, newEntry],
+      actionLog: appendAndTrim(actionLog, newEntry),
     });
   },
 
@@ -622,6 +655,20 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     get().executeAction(action, { source: 'remote' });
     return true;
+  },
+
+  getActionsSince: (seq) => {
+    const { actionLog } = get();
+    if (actionLog.length === 0) return [];
+    // `seq` is also the index in actionLog when the log hasn't
+    // been trimmed (we always push with `seq: actionLog.length`).
+    // Once trimming kicks in, the relationship `entries[i].seq`
+    // still grows by 1 per entry, so a binary/linear search by
+    // seq is correct. Linear is fine — log is bounded to a few
+    // hundred entries.
+    const start = actionLog.findIndex((e) => e.seq >= seq);
+    if (start === -1) return [];
+    return actionLog.slice(start);
   },
 
   resetSelection: () => set({ selectedInstanceId: null, validMoveTargets: [] }),
