@@ -200,8 +200,7 @@ export function MainMenu() {
           <button
             type="button"
             className={styles.secondaryButton}
-            disabled
-            title="Coming soon"
+            onClick={() => router.push('/tutorial')}
           >
             Tutorial
           </button>

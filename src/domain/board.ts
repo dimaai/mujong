@@ -6,7 +6,7 @@
 // the `figures` array in GameState. These helpers abstract that.
 // ============================================================
 
-import type { Position, PlayerFigureInstance, AllowedFigure } from './types';
+import type { Position, PlayerFigureInstance, AllowedFigure, GameState } from './types';
 
 // ── Query helpers ─────────────────────────────────────────────
 
@@ -218,3 +218,72 @@ export function seededRng(seed: string): () => number {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+
+// ── Clocks (Step 21) ──────────────────────────────────────────
+
+/**
+ * Pure helper: charge wall-clock time to the current player and,
+ * on flag-fall, end the game in the opponent's favour.
+ *
+ * Inputs:
+ *   - `state` — current `GameState`.
+ *   - `now`   — `Date.now()`-equivalent passed in by the caller so
+ *               this function stays deterministic / testable.
+ *
+ * Output: a new `GameState`. When `state.clocks === null`, when
+ *         `phase !== 'playing'`, or when a draw offer is pending,
+ *         the same `state` reference is returned (no allocation).
+ *
+ * Behaviour:
+ *   - If `clocks.lastTickAt === null`, this call only stamps
+ *     `lastTickAt = now` and charges nothing. That's the
+ *     "first tick after game start / hydrate" case.
+ *   - Otherwise charges `(now - lastTickAt)` ms to the current
+ *     player. Negative or zero deltas (clock skew) are clamped
+ *     to 0 so we never *add* time.
+ *   - When the charged clock hits 0, flips `phase` to `'finished'`
+ *     and sets `winnerId` to the opposite player.
+ */
+export function tickClock(state: GameState, now: number): GameState {
+  const clocks = state.clocks;
+  if (clocks === null) return state;
+  if (state.phase !== 'playing') return state;
+  // Pause the clock while a draw offer hangs — matches the legacy
+  // behaviour from the old `tickTimer` action.
+  if (state.drawOfferFrom !== null) return state;
+
+  if (clocks.lastTickAt === null) {
+    return { ...state, clocks: { ...clocks, lastTickAt: now } };
+  }
+
+  const delta = Math.max(0, now - clocks.lastTickAt);
+  if (delta === 0) return state;
+
+  const idx = state.currentPlayerIndex;
+  const isP1 = idx === 0;
+  const remaining = Math.max(
+    0,
+    (isP1 ? clocks.p1RemainingMs : clocks.p2RemainingMs) - delta,
+  );
+  const nextClocks: GameClocksLike = {
+    p1RemainingMs: isP1 ? remaining : clocks.p1RemainingMs,
+    p2RemainingMs: isP1 ? clocks.p2RemainingMs : remaining,
+    lastTickAt: now,
+  };
+
+  if (remaining === 0) {
+    // Flag-fall: opponent wins.
+    const winnerId = state.players[isP1 ? 1 : 0].id;
+    return {
+      ...state,
+      clocks: nextClocks,
+      phase: 'finished',
+      winnerId,
+    };
+  }
+
+  return { ...state, clocks: nextClocks };
+}
+
+// Local alias to keep the inferred shape tight without a second import.
+type GameClocksLike = NonNullable<GameState['clocks']>;

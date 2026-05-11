@@ -340,6 +340,16 @@ export interface NetSessionRecord {
 /** Auto-reconnect cadence while `connectionLost === true`. */
 const RECONNECT_RETRY_MS = 8_000;
 
+/**
+ * Step 20: minimum gap between outbound `RESYNC_REQ` frames. We
+ * may detect several consecutive ACTION gaps in quick succession
+ * (the peer ships them faster than we can process) — without rate
+ * limiting we'd flood the channel with redundant catch-up
+ * requests. 2 s matches the plan and is well below the 5 s PING
+ * cadence so a real loss still recovers quickly.
+ */
+const RESYNC_REQ_MIN_GAP_MS = 2_000;
+
 // ── Module-level non-reactive refs ────────────────────────────
 //
 // These intentionally live outside the store. Putting an
@@ -401,6 +411,13 @@ let pendingByeReason: ByeReason | null = null;
  * success or on any teardown path.
  */
 let reconnectTimer: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Step 20: wall-clock (ms) of the last outbound RESYNC_REQ. Used
+ * to rate-limit catch-up requests so a burst of out-of-order
+ * ACTIONs doesn't trigger a request storm. Reset by `teardown()`.
+ */
+let lastResyncReqAt = 0;
 
 // ── netSession persistence helpers (Step 19.5) ───────────────
 
@@ -724,6 +741,12 @@ export const useNetStore = create<NetState>((set, get) => {
             got: msg.seq,
             want: expectedRemoteSeq,
           });
+          // Step 20: ask the peer to ship the missing entries.
+          // Rate-limited so a burst of out-of-order ACTIONs doesn't
+          // flood the channel — one request every RESYNC_REQ_MIN_GAP_MS
+          // is plenty since the responder will return everything
+          // from `expectedRemoteSeq` onwards in a single RESYNC_RES.
+          requestResync(logger);
           return;
         }
         const applied = useGameStore.getState().applyRemoteAction({
@@ -795,6 +818,82 @@ export const useNetStore = create<NetState>((set, get) => {
         // click starts clean. The GameCanvas already routes back
         // to the main menu after `phase === 'finished'`.
         handleRemoteAbort('left');
+        return;
+      }
+
+      if (msg.type === 'RESYNC_REQ') {
+        // Step 20: peer noticed a gap in our outbound seqs and
+        // wants the missing actions. Reply with whatever we have
+        // from `fromSeq` onwards. Empty `actions` is valid — it
+        // tells the peer "you're caught up, the gap was spurious".
+        if (msg.seq === expectedRemoteSeq) expectedRemoteSeq = msg.seq + 1;
+        const entries = useGameStore.getState().getActionsSince(msg.fromSeq);
+        try {
+          currentPeer?.send({
+            v: PROTOCOL_VERSION,
+            gameId: get().code ?? '',
+            senderId: getDeviceId(),
+            seq: outgoingSeq++,
+            t: Date.now(),
+            type: 'RESYNC_RES',
+            fromSeq: msg.fromSeq,
+            actions: entries.map((e) => e.action),
+          });
+        } catch (err) {
+          logger.log('warn', 'resync.res.send', String(err));
+        }
+        return;
+      }
+
+      if (msg.type === 'RESYNC_RES') {
+        // Step 20: catch-up batch from the peer. We only consume
+        // the suffix that starts at our current `expectedRemoteSeq`
+        // — anything older is a duplicate (already applied) and
+        // anything newer would still leave a gap (shouldn't happen
+        // in practice; the responder honoured our `fromSeq`). Apply
+        // each action through the same reducer path as a single
+        // ACTION; the per-call `turnNumber` is read fresh because
+        // each `applyRemoteAction` advances it by 1.
+        if (msg.seq === expectedRemoteSeq) expectedRemoteSeq = msg.seq + 1;
+        if (msg.actions.length === 0) {
+          logger.log('debug', 'resync.empty', { fromSeq: msg.fromSeq });
+          return;
+        }
+        // Drop the prefix we've already seen.
+        const skip = Math.max(0, expectedRemoteSeq - msg.fromSeq);
+        if (skip > msg.actions.length) {
+          // Wholly stale — already past the end of this batch.
+          return;
+        }
+        const slice = msg.actions.slice(skip);
+        let applied = 0;
+        for (const action of slice) {
+          const turnNumber = useGameStore.getState().game?.turnNumber;
+          if (turnNumber == null) break;
+          const ok = useGameStore.getState().applyRemoteAction({
+            action,
+            turnNumber,
+          });
+          if (!ok) {
+            logger.log('warn', 'resync.apply.reject', {
+              fromSeq: msg.fromSeq,
+              applied,
+            });
+            break;
+          }
+          applied += 1;
+        }
+        // Advance the cursor past the entries we successfully
+        // consumed. A partial application leaves the rest of the
+        // batch unread; the next gap-detect will request a fresh
+        // resync from the new `expectedRemoteSeq`.
+        expectedRemoteSeq = msg.fromSeq + skip + applied;
+        logger.log('info', 'resync.applied', {
+          fromSeq: msg.fromSeq,
+          received: msg.actions.length,
+          applied,
+          expectedRemoteSeq,
+        });
         return;
       }
     });
@@ -937,6 +1036,7 @@ export const useNetStore = create<NetState>((set, get) => {
     currentClient = null;
     outgoingSeq = 1;
     expectedRemoteSeq = 1;
+    lastResyncReqAt = 0;
     inFlight = false;
   }
 
@@ -964,6 +1064,35 @@ export const useNetStore = create<NetState>((set, get) => {
         turnNumber: entry.turnNumber,
       });
     });
+  }
+
+  /**
+   * Step 20: send a `RESYNC_REQ` for the missing suffix starting
+   * at `expectedRemoteSeq`. Rate-limited via `lastResyncReqAt` so
+   * a burst of out-of-order ACTIONs in the same tick does NOT
+   * trigger a request storm — one per `RESYNC_REQ_MIN_GAP_MS`.
+   */
+  function requestResync(logger: {
+    log: (level: 'debug' | 'info' | 'warn' | 'error', tag: string, data?: unknown) => void;
+  }): void {
+    if (!currentPeer) return;
+    const now = Date.now();
+    if (now - lastResyncReqAt < RESYNC_REQ_MIN_GAP_MS) return;
+    lastResyncReqAt = now;
+    try {
+      currentPeer.send({
+        v: PROTOCOL_VERSION,
+        gameId: get().code ?? '',
+        senderId: getDeviceId(),
+        seq: outgoingSeq++,
+        t: now,
+        type: 'RESYNC_REQ',
+        fromSeq: expectedRemoteSeq,
+      });
+      logger.log('info', 'resync.req', { fromSeq: expectedRemoteSeq });
+    } catch (err) {
+      logger.log('warn', 'resync.req.send', String(err));
+    }
   }
 
   /**
@@ -1445,6 +1574,7 @@ export const useNetStore = create<NetState>((set, get) => {
       // before the drop would otherwise fire spurious gap warnings.
       outgoingSeq = 1;
       expectedRemoteSeq = 1;
+      lastResyncReqAt = 0;
 
       const client = createSignalingClient();
       currentClient = client;

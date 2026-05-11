@@ -384,6 +384,93 @@ What landed deviates from the plan above. Capturing the delta so a future contri
 
 ---
 
+## Next 5 steps (continue here, after Step 20 lands)
+
+> Step 20 closes out the networking happy path: lockstep play, auto-reconnect, and missed-action recovery all work. What remains is (1) one outstanding gameplay gap — the `timerMinutes` setting is shown in `/settings` but not enforced anywhere — and (2) the polish + cloud-sync phases listed below. This batch lands the timer first (smallest user-facing bug), then the two polish items that unblock deleting dead code, then opens the cloud-sync foundation in two reviewable slices.
+>
+> The two cloud-sync steps (24 + 25) are deliberately *frontend-only*: pure LWW reconciliation logic, then a typed HTTP client wired to the existing stores against a *mock* server. The real Azure Function (Phase J-4) lands as Step 26 in the following batch so each PR stays under the ~150 LOC / ~2-file guideline.
+
+### Step 21 — Per-player game clock (enforce `timerMinutes`)
+1. **Step name:** Make the timer setting actually count down and end the game on flag-fall.
+2. **Files involved:**
+   - [src/domain/types.ts](src/domain/types.ts) *(touch — add `clocks: { p1RemainingMs: number; p2RemainingMs: number; lastTickAt: number | null } | null` to `GameState`; `null` means "timer disabled")*
+   - [src/domain/board.ts](src/domain/board.ts) *(touch — `createInitialState` seeds `clocks` from `options.timerMinutes`; new pure helper `tickClock(state, now): GameState` that subtracts elapsed wall-time from the current player's clock and flips `phase` to `'finished'` with `winner = otherPlayer` on flag-fall)*
+   - [src/domain/rules.ts](src/domain/rules.ts) *(touch — reducer charges the *current* player's clock between `lastTickAt` and `now` on every action; resets `lastTickAt` to `now` after the turn flips)*
+   - [src/store/gameStore.ts](src/store/gameStore.ts) *(touch — a single `setInterval(250 ms)` driver that calls `tickClock` while `phase === 'playing'` and `clocks !== null`; cleared on `endGame` / mode change. **Not** persisted into the snapshot — on resume we set `lastTickAt = Date.now()` so the resumed turn starts fresh)*
+   - [src/components/PlayerPanel/PlayerPanel.tsx](src/components/PlayerPanel/PlayerPanel.tsx) *(touch — render `mm:ss` from each player's clock; turn red below 30 s; pulse on the active player)*
+   - `src/domain/__tests__/clocks.test.ts` *(new — table-driven: tick after 10 s subtracts 10 s from the current player only; flag-fall sets `winner`; disabled timer is a no-op)*
+3. **What will be implemented:**
+   - **Pure-domain clocks.** All time math lives in [src/domain/board.ts](src/domain/board.ts) so the rules engine stays deterministic and Node-testable (no `Date.now()` inside the reducer; `now` is passed in).
+   - **Single source of truth: gameStore.** Only the store calls `Date.now()` and only the store schedules the 250 ms interval. UI components read `clocks` reactively; they never set their own intervals.
+   - **Network mode:** the clock is driven *locally* on each peer from `state.clocks.lastTickAt`. Both peers tick from the same `lastTickAt` (it's part of `GameState` and ships in `START` + every `ACTION` echo), so clocks stay within one network RTT of each other. On flag-fall, whichever peer notices first sends a normal `ACTION` of type `'TIMEOUT'` (new variant) — Step 17's lockstep keeps the other side in agreement.
+   - **Resume / snapshot:** the local snapshot (Step 10) stores `clocks` but `lastTickAt` is reset to `Date.now()` on hydrate. Rationale: we can't trust wall-clock deltas across a pause-to-tomorrow gap, and the alternative (deducting the gap) would let players "pause" the timer by closing the tab.
+   - **Display-only when disabled.** If `options.timerMinutes === 0`, `state.clocks === null` and `PlayerPanel` renders no clock at all — same as today.
+4. **STOP condition:** Set timer to 1 minute in `/settings`, start a single-device game, let player 1's clock run out without moving → game ends with player 2 as winner; player 1's panel shows `00:00`. Network mode: same scenario across two tabs, both screens transition to the win state within ~250 ms. `npm run type-check`, `npm run lint`, and the new `clocks.test.ts` pass; existing tests stay green (timer-off paths are unchanged).
+
+### Step 22 — Tutorial route (Phase I-1)
+1. **Step name:** Make the disabled "Tutorial" button on MainMenu lead to a real explainer page.
+2. **Files involved:**
+   - `src/app/tutorial/page.tsx` *(new — server component, no client JS needed)*
+   - `src/components/Tutorial/Tutorial.tsx` *(new — pure presentational)*
+   - `src/components/Tutorial/Tutorial.module.css` *(new)*
+   - [src/components/MainMenu/MainMenu.tsx](src/components/MainMenu/MainMenu.tsx) *(touch — un-stub the "Tutorial" button to `router.push('/tutorial')`)*
+   - `public/images/tutorial/` *(new — small static images of each piece on a board square; reuse existing figure SVGs where possible to avoid new asset churn)*
+3. **What will be implemented:**
+   - Single-page scrolling layout with sections: **Goal**, **Setup**, **Pieces** (one row per figure with name, icon, movement summary pulled from [src/data/figuretypes.ts](src/data/figuretypes.ts) — no duplication), **Turn structure** (place vs. move), **Walls** (if enabled in settings), **Winning** (capture all opponents' "king" equivalent — confirm exact win condition from [src/domain/rules.ts](src/domain/rules.ts)).
+   - "Back to menu" button at top and bottom; uses `router.back()` if the referrer is `/`, otherwise `router.push('/')`.
+   - **No interactive board** in v1. A future step can add a clickable mini-board, but that's a separate slice — keeping this step under ~150 LOC means text + static figure icons only.
+   - Content is keyed off the same data files the game uses, so future rule changes are reflected automatically without editing tutorial copy.
+4. **STOP condition:** MainMenu → Tutorial → page renders with all pieces and rules; back navigation returns to MainMenu. Page loads with zero client-side hydration warnings (verified in DevTools). `npm run type-check` and `npm run lint` pass.
+
+### Step 23 — Remove legacy `GameSetup` and deprecated `levels.ts`
+1. **Step name:** Delete the dead code Step 5 promised to clean up "in a follow-up".
+2. **Files involved:**
+   - [src/components/GameSetup/GameSetup.tsx](src/components/GameSetup/GameSetup.tsx) *(delete)*
+   - [src/components/GameSetup/GameSetup.module.css](src/components/GameSetup/GameSetup.module.css) *(delete)*
+   - [src/data/levels.ts](src/data/levels.ts) *(delete — the only remaining production reference is the Step 3 one-time migration; if that migration has already shipped to all users in `mojong.settings.v1`, delete the migration block too; otherwise keep the migration but inline the three `Level` shapes as local constants and drop the module)*
+   - [src/store/settingsStore.ts](src/store/settingsStore.ts) *(touch — if the migration is inlined or removed, update imports accordingly)*
+   - `src/components/GameSetup/__tests__/*` *(delete any stale tests)*
+   - `grep` audit: confirm zero remaining imports of `GameSetup` or `Level` outside the migration.
+3. **What will be implemented:**
+   - Pure deletion. No new logic. No behaviour change.
+   - **Decision on the migration:** keep it for one more release if there's any concern about returning users with `selectedLevelId` still in storage. Bias toward inlining the three `Level` constants so [src/data/levels.ts](src/data/levels.ts) can go away — the file is the only blocker to a clean `src/data/` tree.
+   - Update [ARCHITECTURE.md](ARCHITECTURE.md) §"Migration" lines mentioning `GameSetup` to past-tense and add a note that the migration has shipped.
+4. **STOP condition:** `npm run type-check`, `npm run lint`, and the full test suite pass. `grep -r GameSetup src/` and `grep -r 'data/levels' src/` return zero hits (outside the migration's inline copy, if kept). `npm run build` succeeds with no orphaned-module warnings. Bundle size goes down (capture before/after in the PR).
+
+### Step 24 — Sync client core: LWW reconciliation (pure module, no I/O)
+1. **Step name:** Pure module that decides who wins when local and remote `Persisted<T>` envelopes disagree.
+2. **Files involved:**
+   - `src/sync/types.ts` *(new — `SyncKind = 'profile' | 'settings'`; re-export `Persisted<T>` from [src/persistence/storage.ts](src/persistence/storage.ts))*
+   - `src/sync/reconcile.ts` *(new — `reconcile<T>(local: Persisted<T> | null, remote: Persisted<T> | null): { winner: 'local' | 'remote' | 'tie'; merged: Persisted<T> | null }`)*
+   - `src/sync/__tests__/reconcile.test.ts` *(new — table-driven cases)*
+3. **What will be implemented:**
+   - **Last-write-wins by `updatedAt`.** Tie-break by `deviceId` lexicographically so two devices that wrote at the exact same ms still converge deterministically.
+   - **Schema-version guard.** If `local.v !== remote.v`, the higher `v` wins regardless of `updatedAt` — that's the "I just upgraded the app" case.
+   - **Null handling.** `null + null → null`; `null + remote → remote` (and vice-versa). No mutation; always returns a new envelope.
+   - **No network, no storage.** This module is the kernel that Step 25's HTTP wrapper and a future React Native build both consume verbatim. Per copilot rules, keep shared logic framework-agnostic.
+   - Test matrix: local newer, remote newer, exact tie + deviceId tie-break, schema-version mismatch each direction, both-null, one-null × 2.
+4. **STOP condition:** All cases in `reconcile.test.ts` green. `npm run type-check` and `npm run lint` pass. Zero imports into `useProfileStore` / `useSettingsStore` yet — this is a pure module landed in isolation.
+
+### Step 25 — Sync HTTP client + wire `useProfileStore` and `useSettingsStore`
+1. **Step name:** Pull on app start, push on store change (debounced 1 s), reconcile via Step 24.
+2. **Files involved:**
+   - `src/sync/httpClient.ts` *(new — `createSyncClient({ baseUrl, userId, fetch }): SyncClient` with `pull(kind)`, `push(kind, envelope)`; throws `SyncStaleError` on `409`, `SyncOfflineError` on network failure)*
+   - `src/sync/syncStore.ts` *(new — Zustand store: `{ status: 'idle' | 'syncing' | 'error' | 'offline'; lastSyncedAt: number | null }`; one action per kind)*
+   - `src/sync/wire.ts` *(new — `installSyncListeners()`: subscribes to `useProfileStore` and `useSettingsStore`, debounces 1 s, and pipes through the client; called once from a top-level effect)*
+   - [src/app/layout.tsx](src/app/layout.tsx) *(touch — a tiny client component mounts `installSyncListeners()` once and re-runs on `online` event)*
+   - [src/components/Settings/Settings.tsx](src/components/Settings/Settings.tsx) *(touch — render a minimal "Synced · 5s ago" / "Offline" indicator reading `useSyncStore`)*
+   - `src/sync/__tests__/httpClient.test.ts` *(new — fetch is mocked; covers 200/409/network-failure)*
+   - `src/sync/__tests__/wire.test.ts` *(new — fake stores, fake client; assert debounce + pull-on-mount + reconcile-on-conflict)*
+3. **What will be implemented:**
+   - **Wire contract:** `GET /api/sync/{userId}/{kind}` returns `Persisted<T> | null`; `PUT /api/sync/{userId}/{kind}` accepts a `Persisted<T>`, returns `200` on accept or `409 { current: Persisted<T> }` if the server has a newer `updatedAt`. Client handles `409` by feeding `current` into `reconcile` from Step 24 and re-`PUT`-ing the winner. Bounded to 3 attempts before surfacing `SyncStaleError`.
+   - **Debounce.** A single `setTimeout(1000)` per kind, cancelled by subsequent writes; flushes immediately on `beforeunload`.
+   - **Online/offline.** `navigator.onLine === false` short-circuits to `SyncOfflineError` and flips `syncStore.status = 'offline'`; on `online` event, a one-shot `pull(kind)` per kind re-runs to recover any divergence.
+   - **userId.** Pulled from `getUserId()` (Step 1). For v1 it equals `deviceId` so two devices have *different* userIds and don't sync with each other — that's correct until Phase K introduces auth.
+   - **The backend Function does not exist yet.** Step 25 ships against a Vite-only mock in tests + a `process.env.NEXT_PUBLIC_SYNC_BASE_URL` toggle so the real call can be disabled until Step 26 lands the server. Default in production: feature flag off.
+4. **STOP condition:** With the feature flag on and a mock `/api/sync/*` returning `null` (i.e. empty server): changing a name in MainMenu causes a `PUT` within ~1 s, visible in DevTools Network. Pre-seeding the mock with a newer envelope then reloading the page hydrates `useProfileStore` from the server. Killing the network → indicator flips to "Offline"; re-enabling triggers a `pull`. All new unit tests pass; existing stores' behaviour is unchanged when the feature flag is off.
+
+---
+
 ## Subsequent phases (for context only — not the next 5 steps)
 
 These are listed so reviewers see the shape of the work. They are **not** approved yet and will be sliced into their own small steps when their turn comes. Order is suggested, not contractual.
