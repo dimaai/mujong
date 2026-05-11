@@ -29,10 +29,10 @@ export const LEVELS: Level[] = [
     // Each player gets 3 Walkers and 1 Runner.
     // Simple set so you can learn placement and basic movement.
     allowedFigures: [
-      { figureTypeId: 'ft_slon', quantity: 2 },
+      { figureTypeId: 'ft_slon', quantity: 0 },
       { figureTypeId: 'ft_runner', quantity: 2 },
-      { figureTypeId: 'ft_cross', quantity: 1 },
-      { figureTypeId: 'ft_ziraf', quantity: 1 },
+      { figureTypeId: 'ft_cross', quantity: 0 },
+      { figureTypeId: 'ft_ziraf', quantity: 0 },
     ],
     player1Color: '#4A90D9', // blue
     player2Color: '#D94A4A', // red
@@ -49,7 +49,7 @@ export const LEVELS: Level[] = [
       { figureTypeId: 'ft_slon', quantity: 2 },
       { figureTypeId: 'ft_runner', quantity: 2 },
       { figureTypeId: 'ft_cross', quantity: 1 },
-      { figureTypeId: 'ft_ziraf', quantity: 1 },
+      { figureTypeId: 'ft_ziraf', quantity: 0 },
     ],
     player1Color: '#4A90D9',
     player2Color: '#D94A4A',
@@ -65,7 +65,7 @@ export const LEVELS: Level[] = [
     allowedFigures: [
       { figureTypeId: 'ft_slon', quantity: 2 },
       { figureTypeId: 'ft_runner', quantity: 2 },
-      { figureTypeId: 'ft_cross', quantity: 1 },
+      { figureTypeId: 'ft_cross', quantity: 2 },
       { figureTypeId: 'ft_ziraf', quantity: 1 },
       // { figureTypeId: 'ft_ziraf', quantity: 1 },
     ],

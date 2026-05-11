@@ -82,15 +82,15 @@ export const FIGURE_TYPE_MAP: Record<string, FigureType> = Object.fromEntries(
 
 const ROSTER_BY_DIFFICULTY: Record<Difficulty, AllowedFigure[]> = {
   beginner: [
-    { figureTypeId: 'ft_slon', quantity: 2 },
-    { figureTypeId: 'ft_runner', quantity: 1 },
+    { figureTypeId: 'ft_slon', quantity: 0 },
+    { figureTypeId: 'ft_runner', quantity: 2 },
     { figureTypeId: 'ft_cross', quantity: 1 },
   ],
   normal: [
     { figureTypeId: 'ft_slon', quantity: 2 },
     { figureTypeId: 'ft_runner', quantity: 2 },
     { figureTypeId: 'ft_cross', quantity: 1 },
-    { figureTypeId: 'ft_ziraf', quantity: 1 },
+    { figureTypeId: 'ft_ziraf', quantity: 0 },
   ],
   advanced: [
     { figureTypeId: 'ft_slon', quantity: 2 },
