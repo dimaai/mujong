@@ -61,6 +61,10 @@ export function GameCanvas() {
 
   const [cellSize, setCellSize] = useState(64);
   const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null);
+  // Becomes `true` ~600 ms after the game ends. Gates the
+  // canvas-wide tap-to-dismiss so the click that accepted a
+  // draw / made the winning move can't double as the dismiss.
+  const [canDismiss, setCanDismiss] = useState(false);
 
   // Step 18: connection-quality pill. We subscribe per-field so a
   // store update on, say, `peerProfile` doesn't repaint the pill.
@@ -117,6 +121,20 @@ export function GameCanvas() {
     window.addEventListener('keydown', back);
     return () => window.removeEventListener('keydown', back);
   }, [game, resetGame]);
+
+  // Arm the canvas-wide tap-to-dismiss only after a short delay
+  // once the game ends. Without it, the same touch that pressed
+  // Accept (or made the winning move) bubbles to the canvas and
+  // immediately tears the screen down on mobile.
+  useEffect(() => {
+    const ended = game?.phase === 'finished' || game?.phase === 'draw';
+    if (!ended) {
+      setCanDismiss(false);
+      return;
+    }
+    const t = setTimeout(() => setCanDismiss(true), 600);
+    return () => clearTimeout(t);
+  }, [game?.phase]);
 
   // Close the sandwich menu when the turn changes or game phase changes.
   useEffect(() => {
@@ -250,12 +268,13 @@ export function GameCanvas() {
     : validMoveTargets.filter((p) => p.row >= level.boardHeight);
 
   const gameOver = phase === 'finished' || phase === 'draw';
+  const tapToDismiss = gameOver && canDismiss;
 
   return (
     <div
       className={styles.canvas}
-      onClick={gameOver ? resetGame : undefined}
-      style={gameOver ? { cursor: 'pointer' } : undefined}
+      onClick={tapToDismiss ? resetGame : undefined}
+      style={tapToDismiss ? { cursor: 'pointer' } : undefined}
     >
       {/* Winner / draw banner.
           In network mode we render "You win!" / "You lost" instead

@@ -419,6 +419,17 @@ let reconnectTimer: ReturnType<typeof setInterval> | null = null;
  */
 let lastResyncReqAt = 0;
 
+/**
+ * True while we are voluntarily closing the peer from inside
+ * `teardown()`. `peer.close()` emits `state: 'closed'`
+ * synchronously, which the long-lived state listener would
+ * otherwise interpret as a mid-game disconnect and kick off
+ * `attemptReconnect()` — leaving the netStore stuck in
+ * `status: 'connecting'` after a clean draw/finish. The flag
+ * tells the listener to ignore the close it just caused.
+ */
+let voluntaryClose = false;
+
 // ── netSession persistence helpers (Step 19.5) ───────────────
 
 /** Write the re-attach record so a brief drop can resume cleanly. */
@@ -903,6 +914,9 @@ export const useNetStore = create<NetState>((set, get) => {
     // local game so the survivor isn't stranded on a frozen board.
     peer.on('state', (s) => {
       if (s !== 'closed' && s !== 'failed') return;
+      // We just closed the peer ourselves (clean teardown after a
+      // draw / finished / leave). Don't treat it as a disconnect.
+      if (voluntaryClose) return;
       // Don't clobber an existing error (e.g. from BYE handler).
       if (get().status === 'error') return;
       if (get().gameStarted) {
@@ -1022,11 +1036,13 @@ export const useNetStore = create<NetState>((set, get) => {
     // Clear the gameStore broadcaster first so any in-flight
     // `executeAction` doesn't try to push to a closed channel.
     setActionBroadcaster(null);
+    voluntaryClose = true;
     try {
       currentPeer?.close();
     } catch {
       // best-effort
     }
+    voluntaryClose = false;
     try {
       currentClient?.close();
     } catch {
