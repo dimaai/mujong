@@ -31,6 +31,7 @@ import { useRouter } from 'next/navigation';
 import { useSettingsStore, useSettingsHydrated } from '../../store/settingsStore';
 import { BOARD_SIZES } from '../../data/boardSizes';
 import type { Difficulty, GameOptions } from '../../domain/types';
+import { SyncIndicator } from './SyncIndicator';
 
 import styles from './Settings.module.css';
 
@@ -270,6 +271,8 @@ export function Settings() {
             Cancel
           </button>
         </div>
+
+        <SyncIndicator />
       </div>
     </div>
   );
