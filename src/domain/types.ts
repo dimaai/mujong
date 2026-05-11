@@ -162,6 +162,25 @@ export type TurnAction =
 export type GamePhase = 'playing' | 'finished' | 'draw';
 
 /**
+ * Per-player remaining time, in milliseconds. Step 21 replaced the
+ * coarser seconds-based `playerTimers` with this shape so the
+ * domain can charge wall-time precisely between actions instead of
+ * relying on a 1 Hz UI tick.
+ */
+export interface GameClocks {
+  /** Player 1 (`players[0]`) remaining time in ms. Floors at 0. */
+  p1RemainingMs: number;
+  /** Player 2 (`players[1]`) remaining time in ms. Floors at 0. */
+  p2RemainingMs: number;
+  /**
+   * `Date.now()` at which the current player's clock was last
+   * charged. `null` = paused (game just started, or just resumed
+   * from a snapshot).
+   */
+  lastTickAt: number | null;
+}
+
+/**
  * The complete runtime state of a game session.
  * This is what Zustand stores and React reads.
  *
@@ -201,10 +220,17 @@ export interface GameState {
   /** Why the game ended in a draw: repetition or mutual agreement. */
   drawReason: 'repetition' | 'agreement' | null;
   /**
-   * Remaining time in seconds for each player.
-   * [0] = Player 1, [1] = Player 2.
+   * Per-player game clocks (Step 21). `null` when the user disabled
+   * the timer (`options.timerMinutes === 0`) — no countdown UI and
+   * no flag-fall path exists in that case.
+   *
+   * `lastTickAt` is the wall-clock ms (Date.now()) at which the
+   * current player's clock was last charged. `null` means the
+   * clock is paused — used at game start (before any tick) and
+   * after rehydrating a snapshot, so a tab that was closed
+   * overnight doesn't deduct the gap.
    */
-  playerTimers: [number, number];
+  clocks: GameClocks | null;
   /**
    * When true, the top player's panel is rendered upside-down
    * so two players can sit across from each other on one screen.

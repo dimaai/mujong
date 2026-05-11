@@ -26,7 +26,7 @@ import type {
 } from '../domain/types';
 import { FIGURE_TYPE_MAP, getFigureRosterFor } from '../data/figuretypes';
 import { BOARD_SIZE_MAP } from '../data/boardSizes';
-import { createInitialFigures, getFigureAt, placeWalls, seededRng } from '../domain/board';
+import { createInitialFigures, getFigureAt, placeWalls, seededRng, tickClock } from '../domain/board';
 import { getValidMoves, getValidPlacements, isWinningMove } from '../domain/rules';
 import { getEnvelope, removeItem, setEnvelope } from '../persistence/storage';
 import { STORAGE_KEYS } from '../persistence/keys';
@@ -189,6 +189,33 @@ function appendAndTrim(
   return next;
 }
 
+// ── Clocks (Step 21) ──────────────────────────────────────────
+//
+// `executeAction` calls this once per move: it charges the *moving*
+// player up to `now`, then stamps `lastTickAt = now` so the next
+// player's clock starts ticking from the same instant the turn
+// flipped. Returns `null` unchanged when the timer is disabled.
+function chargeClocksOnAction(
+  clocks: GameState['clocks'],
+  movingPlayerIndex: 0 | 1,
+  now: number,
+): GameState['clocks'] {
+  if (clocks === null) return null;
+  // First action of the game: no prior tick to subtract from.
+  // Just stamp `now` so the *opponent's* clock begins counting
+  // when they receive control.
+  if (clocks.lastTickAt === null) {
+    return { ...clocks, lastTickAt: now };
+  }
+  const delta = Math.max(0, now - clocks.lastTickAt);
+  const isP1 = movingPlayerIndex === 0;
+  return {
+    p1RemainingMs: isP1 ? Math.max(0, clocks.p1RemainingMs - delta) : clocks.p1RemainingMs,
+    p2RemainingMs: isP1 ? clocks.p2RemainingMs : Math.max(0, clocks.p2RemainingMs - delta),
+    lastTickAt: now,
+  };
+}
+
 /**
  * Everything the UI needs from the store, split into:
  *   - state   (data React reads)
@@ -332,8 +359,11 @@ interface GameStore {
   rejectDraw: () => void;
 
   /**
-   * Decrements the active player's timer by 1 second.
-   * @returns true when the timer hits 0 (time-out loss)
+   * Step 21: charge wall-clock time to the active player. Normally
+   * driven by a module-level 250 ms interval; exposed here so tests
+   * (and future replay tooling) can step the clock deterministically.
+   *
+   * @returns true when this tick ended the game (flag-fall).
    */
   tickTimer: () => boolean;
 
@@ -417,7 +447,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
       ? placeWalls(sizePreset.width, sizePreset.height, wallsRng)
       : [];
 
-    const timerSeconds = options.timerMinutes * 60;
+    const timerMs = options.timerMinutes * 60_000;
+    const clocks =
+      timerMs > 0
+        ? { p1RemainingMs: timerMs, p2RemainingMs: timerMs, lastTickAt: null }
+        : null;
 
     const newGame: GameState = {
       // Deterministic when `seed` is supplied so a networked host +
@@ -434,7 +468,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       positionHashes: [computePositionKey(figures, 0)],
       drawOfferFrom: null,
       drawReason: null,
-      playerTimers: [timerSeconds, timerSeconds],
+      clocks,
       againstView: options.againstView,
       walls,
     };
@@ -636,6 +670,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
         // Any move cancels a pending draw offer.
         drawOfferFrom: null,
         drawReason,
+        // Step 21: charge the moving player up to *now*, then stamp
+        // `lastTickAt` so the *next* player's clock starts ticking
+        // from the same instant the turn flipped.
+        clocks: chargeClocksOnAction(game.clocks, game.currentPlayerIndex, Date.now()),
       },
       selectedInstanceId: null,
       validMoveTargets: [],
@@ -724,26 +762,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
   tickTimer: () => {
     const { game } = get();
     if (!game || game.phase !== 'playing') return false;
-    // Don't tick when a draw offer is pending.
-    if (game.drawOfferFrom) return false;
-
-    const idx = game.currentPlayerIndex;
-    const newTimers: [number, number] = [...game.playerTimers];
-    newTimers[idx] = Math.max(0, newTimers[idx] - 1);
-
-    if (newTimers[idx] <= 0) {
-      // Time-out: the opponent wins.
-      const opponentId = game.players[idx === 0 ? 1 : 0].id;
-      set({
-        game: { ...game, playerTimers: newTimers, phase: 'finished', winnerId: opponentId },
-        selectedInstanceId: null,
-        validMoveTargets: [],
-      });
-      return true;
-    }
-
-    set({ game: { ...game, playerTimers: newTimers } });
-    return false;
+    const next = tickClock(game, Date.now());
+    if (next === game) return false;
+    const ended = next.phase !== 'playing';
+    set({
+      game: next,
+      ...(ended ? { selectedInstanceId: null, validMoveTargets: [] } : {}),
+    });
+    return ended;
   },
 
   resetGame: () =>
@@ -767,8 +793,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
       removeItem(STORAGE_KEYS.gameSnapshot);
       return false;
     }
+    // Step 21: a resumed game shouldn't deduct wall-time that
+    // passed while the tab was closed. Reset `lastTickAt` to null
+    // so the driver re-stamps it on the next tick without charging.
+    const data: GameState =
+      env.data.clocks !== null
+        ? { ...env.data, clocks: { ...env.data.clocks, lastTickAt: null } }
+        : env.data;
     set({
-      game: env.data,
+      game: data,
       selectedInstanceId: null,
       validMoveTargets: [],
     });
@@ -792,4 +825,41 @@ if (typeof window !== 'undefined') {
     lastGame = state.game;
     scheduleSnapshot();
   });
+}
+
+// ── Clock driver (Step 21) ────────────────────────────────────
+//
+// One 250 ms interval drives `tickTimer` whenever the live game is
+// playing AND has clocks enabled AND no draw offer is pending.
+// Owning this here (instead of in `GameCanvas`) means the clock
+// keeps running even if the user navigates briefly off `/play`,
+// and avoids the old "timer doesn't start until the first move"
+// gap from the GameCanvas-driven interval.
+if (typeof window !== 'undefined') {
+  let clockInterval: ReturnType<typeof setInterval> | null = null;
+
+  const stop = () => {
+    if (clockInterval !== null) {
+      clearInterval(clockInterval);
+      clockInterval = null;
+    }
+  };
+
+  const sync = (game: GameState | null) => {
+    const wants =
+      game !== null &&
+      game.phase === 'playing' &&
+      game.clocks !== null &&
+      game.drawOfferFrom === null;
+    if (wants && clockInterval === null) {
+      clockInterval = setInterval(() => {
+        useGameStore.getState().tickTimer();
+      }, 250);
+    } else if (!wants && clockInterval !== null) {
+      stop();
+    }
+  };
+
+  sync(useGameStore.getState().game);
+  useGameStore.subscribe((state) => sync(state.game));
 }

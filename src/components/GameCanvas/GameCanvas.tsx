@@ -17,7 +17,7 @@
 
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useGameStore } from '../../store/gameStore';
 import { useNetStore } from '../../store/netStore';
 import { Board } from '../Board/Board';
@@ -50,7 +50,6 @@ export function GameCanvas() {
     offerDraw,
     acceptDraw,
     rejectDraw,
-    tickTimer,
     mode,
     localPlayerIndex,
   } = useGameStore();
@@ -62,7 +61,6 @@ export function GameCanvas() {
 
   const [cellSize, setCellSize] = useState(64);
   const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Step 18: connection-quality pill. We subscribe per-field so a
   // store update on, say, `peerProfile` doesn't repaint the pill.
@@ -106,30 +104,9 @@ export function GameCanvas() {
   // ────────────────────────────────────────────────────────────
 
   // ── Per-player countdown timers ─────────────────────────
-  useEffect(() => {
-    if (!game) return;
-    const hasTimer = game.level.timerMinutes > 0;
-
-    if (hasTimer && game.history.length > 0 && game.phase === 'playing' && !game.drawOfferFrom) {
-      if (!intervalRef.current) {
-        intervalRef.current = setInterval(() => {
-          tickTimer();
-        }, 1000);
-      }
-    } else {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-    }
-
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-    };
-  }, [game, tickTimer]);
+  // Step 21 moved the tick driver into `gameStore` (a single
+  // 250 ms interval at module scope). GameCanvas just renders
+  // whatever `game.clocks` currently holds.
 
   // When the game is over, any key press returns to main menu.
   useEffect(() => {
@@ -151,9 +128,9 @@ export function GameCanvas() {
     return <div className={styles.empty}>No game in progress.</div>;
   }
 
-  const { level, players, currentPlayerIndex, figures, walls, phase, winnerId, drawOfferFrom, playerTimers, againstView } = game;
+  const { level, players, currentPlayerIndex, figures, walls, phase, winnerId, drawOfferFrom, clocks, againstView } = game;
   const currentPlayer = players[currentPlayerIndex];
-  const hasTimer = level.timerMinutes > 0;
+  const hasTimer = clocks !== null;
 
   // Step 17: in a networked game we render BOTH players' panels but
   // only the local player may interact. Compute the gate once and
@@ -236,15 +213,20 @@ export function GameCanvas() {
   const boardPixelWidth = level.boardWidth * cellSize + (level.boardWidth - 1);
   const boardPixelHeight = level.boardHeight * cellSize + (level.boardHeight - 1);
 
-  // Timer bar percentages (0–100)
-  const totalTimerSec = level.timerMinutes * 60;
-  const p1TimerPct = totalTimerSec > 0 ? (playerTimers[0] / totalTimerSec) * 100 : 100;
-  const p2TimerPct = totalTimerSec > 0 ? (playerTimers[1] / totalTimerSec) * 100 : 100;
+  // Timer bar percentages (0–100). Step 21: clocks are ms; convert
+  // to seconds for the human-readable label, but compute % directly
+  // in ms so the bar animates smoothly between whole seconds.
+  const totalTimerMs = level.timerMinutes * 60_000;
+  const p1RemMs = clocks?.p1RemainingMs ?? 0;
+  const p2RemMs = clocks?.p2RemainingMs ?? 0;
+  const p1TimerPct = totalTimerMs > 0 ? (p1RemMs / totalTimerMs) * 100 : 100;
+  const p2TimerPct = totalTimerMs > 0 ? (p2RemMs / totalTimerMs) * 100 : 100;
   const timerBarW = Math.round(cellSize / 5);
 
-  function formatTime(seconds: number): string {
-    const m = Math.floor(seconds / 60).toString().padStart(2, '0');
-    const s = (seconds % 60).toString().padStart(2, '0');
+  function formatTime(ms: number): string {
+    const totalSec = Math.max(0, Math.ceil(ms / 1000));
+    const m = Math.floor(totalSec / 60).toString().padStart(2, '0');
+    const s = (totalSec % 60).toString().padStart(2, '0');
     return `${m}:${s}`;
   }
 
@@ -409,7 +391,7 @@ export function GameCanvas() {
                   background: PlayerColors[players[bottomIndex].id] + '80',
                 }}
               />
-              <span className={styles.timerText}>{formatTime(playerTimers[bottomIndex])}</span>
+              <span className={styles.timerText}>{formatTime(bottomIndex === 0 ? p1RemMs : p2RemMs)}</span>
             </div>
           )}
 
@@ -577,7 +559,7 @@ export function GameCanvas() {
                   background: PlayerColors[players[topIndex].id] + '80',
                 }}
               />
-              <span className={styles.timerText}>{formatTime(playerTimers[topIndex])}</span>
+              <span className={styles.timerText}>{formatTime(topIndex === 0 ? p1RemMs : p2RemMs)}</span>
             </div>
           )}
         </div>
