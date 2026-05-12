@@ -25,9 +25,11 @@ export type ParseRouteResult =
   | { ok: true; userId: string; kind: SyncKind }
   | { ok: false; error: 'bad_user_id' | 'bad_kind' };
 
-/** Validate and narrow the `{userId}/{kind}` route segments. */
+/** Validate and narrow the `{userid}/{kind}` route segments. */
 export function parseUserIdAndKind(req: HttpRequest): ParseRouteResult {
-  const userId = (req.params.userId ?? '').trim();
+  // Azure Functions normalises route-template parameter names to
+  // lowercase, so the source-of-truth lookup is `userid`, not `userId`.
+  const userId = (req.params.userid ?? '').trim();
   if (!USER_ID_RE.test(userId)) {
     return { ok: false, error: 'bad_user_id' };
   }

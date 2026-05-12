@@ -52,7 +52,7 @@ export async function syncGetHandler(
 
 app.http('syncGet', {
   methods: ['GET'],
-  route: 'sync/{userId}/{kind}',
+  route: 'sync/{userid}/{kind}',
   authLevel: 'anonymous',
   handler: syncGetHandler,
 });

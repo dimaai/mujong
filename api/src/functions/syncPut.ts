@@ -77,7 +77,7 @@ export async function syncPutHandler(
 
 app.http('syncPut', {
   methods: ['PUT'],
-  route: 'sync/{userId}/{kind}',
+  route: 'sync/{userid}/{kind}',
   authLevel: 'anonymous',
   handler: syncPutHandler,
 });
