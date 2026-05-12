@@ -15,7 +15,7 @@
 
 'use client';
 
-import React from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import type { Position, PlayerFigureInstance, Level } from '../../domain/types';
 import { getFigureAt } from '../../domain/board';
 import { FigureIcon } from '../figures/FigureIcon';
@@ -99,6 +99,46 @@ export function Board({
   // O(1) lookup of wall cells, same encoding as `targetSet`.
   const wallSet = new Set(walls.map((p) => `${p.col},${p.row}`));
 
+  // ── Roving-tabindex keyboard navigation (Step 34) ──────────
+  // Exactly one cell carries `tabIndex=0` at any time. Arrow keys
+  // move that index in logical (col, row) space — the rules engine
+  // is oblivious to `viewFlipped`, and so are we. Enter/Space on a
+  // focused cell calls the same handler as a mouse click.
+  const [focusCol, setFocusCol] = useState(0);
+  const [focusRow, setFocusRow] = useState(0);
+  const cellRefs = useRef(new Map<string, HTMLDivElement>());
+
+  const registerCellRef = useCallback(
+    (key: string) => (el: HTMLDivElement | null) => {
+      if (el) cellRefs.current.set(key, el);
+      else cellRefs.current.delete(key);
+    },
+    [],
+  );
+
+  // Arrow / Home / End navigation shared by interactive cells and
+  // wall cells. Activation (Enter / Space) is handled inline at the
+  // interactive-cell call site, since walls aren't activatable.
+  function moveFocusByKey(e: React.KeyboardEvent, col: number, row: number): boolean {
+    let nc = col;
+    let nr = row;
+    switch (e.key) {
+      case 'ArrowLeft':  nc = Math.max(0, col - 1); break;
+      case 'ArrowRight': nc = Math.min(boardWidth - 1, col + 1); break;
+      case 'ArrowUp':    nr = Math.max(0, row - 1); break;
+      case 'ArrowDown':  nr = Math.min(boardHeight - 1, row + 1); break;
+      case 'Home':       nc = 0; break;
+      case 'End':        nc = boardWidth - 1; break;
+      default: return false;
+    }
+    e.preventDefault();
+    if (nc === col && nr === row) return true;
+    setFocusCol(nc);
+    setFocusRow(nr);
+    cellRefs.current.get(`${nc},${nr}`)?.focus();
+    return true;
+  }
+
   const cells: React.ReactNode[] = [];
 
   // Build cells row by row, column by column (top-left to bottom-right).
@@ -124,26 +164,51 @@ export function Board({
 
       // Wall cells render as a distinct, non-interactive variant.
       // No click handler, no figure (walls and figures can't share a
-      // cell since the rules engine forbids landing on walls).
+      // cell since the rules engine forbids landing on walls). They
+      // still participate in roving-tabindex navigation so arrow
+      // keys can traverse over them.
       if (isWall) {
+        const isFocusedWall = focusCol === col && focusRow === row;
         cells.push(
           <div
             key={posKey}
+            ref={registerCellRef(posKey)}
             className={[
               styles.cell,
               isLight ? styles.cellLight : styles.cellDark,
               styles.cellWall,
             ].join(' ')}
-            role="presentation"
-            aria-label="Wall"
+            role="gridcell"
+            aria-rowindex={row + 1}
+            aria-colindex={col + 1}
+            aria-label={`Wall at column ${col + 1}, row ${row + 1}`}
+            aria-disabled="true"
+            tabIndex={isFocusedWall ? 0 : -1}
+            onFocus={() => {
+              if (!isFocusedWall) {
+                setFocusCol(col);
+                setFocusRow(row);
+              }
+            }}
+            onKeyDown={(e) => {
+              moveFocusByKey(e, col, row);
+            }}
           />,
         );
         continue;
       }
 
+      const isFocused = focusCol === col && focusRow === row;
+      const ariaLabel = figure
+        ? `${figure.playerId === 'p1' ? 'Player 1' : 'Player 2'} ${figure.figureTypeId} at column ${col + 1}, row ${row + 1}`
+        : isHighlighted
+          ? `Valid move target at column ${col + 1}, row ${row + 1}`
+          : `Empty cell at column ${col + 1}, row ${row + 1}`;
+
       cells.push(
         <div
           key={posKey}
+          ref={registerCellRef(posKey)}
           className={[
             styles.cell,
             isLight ? styles.cellLight : styles.cellDark,
@@ -152,6 +217,34 @@ export function Board({
           ]
             .filter(Boolean)
             .join(' ')}
+          role="gridcell"
+          aria-rowindex={row + 1}
+          aria-colindex={col + 1}
+          aria-label={ariaLabel}
+          aria-selected={isSelected || undefined}
+          tabIndex={isFocused ? 0 : -1}
+          onFocus={() => {
+            // Keep the roving index in sync if focus arrives from
+            // outside the grid (e.g. a Tab from the surrounding UI
+            // lands on whichever cell currently has tabIndex=0,
+            // which is exactly what we want).
+            if (!isFocused) {
+              setFocusCol(col);
+              setFocusRow(row);
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              if (figure && !isHighlighted) {
+                onFigureClick(figure.instanceId);
+              } else {
+                onCellClick({ col, row });
+              }
+              return;
+            }
+            moveFocusByKey(e, col, row);
+          }}
           onClick={() => {
             if (figure && !isHighlighted) {
               // Clicked a piece — delegate to parent for selection logic.
@@ -193,6 +286,10 @@ export function Board({
       {/* Main board grid */}
       <div
         className={styles.board}
+        role="grid"
+        aria-rowcount={boardHeight}
+        aria-colcount={boardWidth}
+        aria-label="Game board"
         style={{
           gridTemplateColumns: `repeat(${boardWidth}, ${cellSize}px)`,
           gridTemplateRows: `repeat(${boardHeight}, ${cellSize}px)`,

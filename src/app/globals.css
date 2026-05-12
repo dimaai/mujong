@@ -32,3 +32,36 @@ button {
   cursor: pointer;
   font-family: inherit;
 }
+
+/* ── Accessibility (Step 34) ─────────────────────────────
+ * A consistent focus ring for keyboard users. `:focus-visible`
+ * fires only when the browser heuristically determines the focus
+ * came from the keyboard (or assistive tech), so mouse clicks
+ * don't leave a ring behind. The ring sits OUTSIDE the element
+ * via `outline-offset` so it never overlaps token glyphs or the
+ * board's checkerboard gap.
+ */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid #a78bfa;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Respect the OS-level "Reduce motion" preference. We strip
+ * non-essential transitions and animations rather than disabling
+ * them per-component — anything we actually need to animate for
+ * functional reasons would have to opt back in explicitly.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}
