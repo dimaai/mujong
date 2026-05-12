@@ -35,6 +35,16 @@ permissions:
   id-token: write
   contents: read
 
+# Storage account backing the Function App (Flex Consumption
+# deployment container). The deploy step uploads the ZIP package
+# to this account; if its publicNetworkAccess is Disabled, the
+# GitHub-hosted runner cannot reach it and the deploy fails with
+# a misleading "AzureWebJobsStorage missing" error. See
+# ARCHITECTURE_CLARIFICATIONS.md D-010 for the full rationale.
+env:
+  STORAGE_ACCOUNT_NAME: mojongsignaling
+  STORAGE_RESOURCE_GROUP: mojong
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -70,6 +80,28 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Ensure storage account allows public network access
+        # Flex Consumption deploys upload the ZIP package to the
+        # Function App's backing storage account. If
+        # publicNetworkAccess is Disabled, the runner can't reach
+        # it and the deploy fails with a misleading
+        # "AzureWebJobsStorage missing" warning. Re-enable it
+        # idempotently before every deploy.
+        run: |
+          current=$(az storage account show \
+            --name "$STORAGE_ACCOUNT_NAME" \
+            --resource-group "$STORAGE_RESOURCE_GROUP" \
+            --query publicNetworkAccess -o tsv)
+          echo "publicNetworkAccess is currently: $current"
+          if [ "$current" != "Enabled" ]; then
+            echo "Enabling publicNetworkAccess on $STORAGE_ACCOUNT_NAME..."
+            az storage account update \
+              --name "$STORAGE_ACCOUNT_NAME" \
+              --resource-group "$STORAGE_RESOURCE_GROUP" \
+              --public-network-access Enabled \
+              --output none
+          fi
 
       - name: Deploy to Azure Functions
         uses: Azure/functions-action@v1
