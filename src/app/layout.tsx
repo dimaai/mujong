@@ -12,6 +12,7 @@
 
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import { SyncBootstrap } from './SyncBootstrap';
 
 /**
  * metadata is a Next.js App Router convention.
@@ -60,7 +61,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
        * Next.js automatically injects <head> content (meta, title, etc.)
        * based on the `metadata` export above — no manual <Head> needed.
        */}
-      <body>{children}</body>
+      <body>
+        {/*
+         * SyncBootstrap is a client component that installs the
+         * cloud-sync listeners once per app load (Step 25). It
+         * renders nothing and is a no-op when the
+         * NEXT_PUBLIC_SYNC_BASE_URL feature flag is unset.
+         */}
+        <SyncBootstrap />
+        {children}
+      </body>
     </html>
   );
 }
