@@ -566,7 +566,7 @@ These are listed so reviewers see the shape of the work. They are **not** approv
 - C-4 `Difficulty` → piece roster mapping replaces `Level.allowedFigures`.
 
 **Phase D — In-progress game persistence**
-- D-1 *(scheduled as Step 28)* Snapshot `GameState` to local storage on each `executeAction`.
+- D-1 *(shipped as Step 28)* Snapshot `GameState` to local storage on each `executeAction`.
 - D-2 *(scheduled as Step 29)* "Resume game" banner on MainMenu.
 
 **Phase E — Net adapter scaffolding (offline-friendly)**
@@ -599,7 +599,7 @@ These are listed so reviewers see the shape of the work. They are **not** approv
 - J-2 *(shipped as Step 25)* `src/sync/httpClient.ts` — fetch wrapper for `GET/PUT /sync/:userId/:kind`, with debounce (1 s) and online/offline awareness.
 - J-3 *(shipped as Step 25)* Wire `useProfileStore` and `useSettingsStore` to the sync client via a single Zustand `subscribe` listener — no store internals change.
 - J-4 *(scheduled as Step 26)* Backend: Azure Static Web Apps managed Function `api/sync/{userId}/{kind}` backed by Azure Table Storage. LWW enforced server-side; `409` on stale `PUT`.
-- J-5 *(scheduled as Step 27)* Reconcile on app start and on `online` event; surface a tiny "Synced · just now" indicator in Settings.
+- J-5 *(shipped as Step 27)* Reconcile on app start and on `online` event; surface a tiny "Synced · just now" indicator in Settings.
 
 **Phase K — Auth (optional, unlocks real cross-device sync)**
 - K-1 Add a Static Web Apps auth provider (Apple / Google) and exchange the session for a stable `userId`.

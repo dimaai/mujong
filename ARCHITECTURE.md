@@ -303,7 +303,7 @@ Use [`@ducanh2912/next-pwa`](https://github.com/DuCanhGH/next-pwa) (maintained f
 | Feature | Offline | Online |
 |---|---|---|
 | Local 2-player game | ✅ | ✅ |
-| Settings + profile persistence | ✅ (local only) | ✅ (local; cloud sync TBD) |
+| Settings + profile persistence | ✅ (local only) | ✅ (local + cloud sync, Phase J) |
 | Network game | ❌ shows "Network unavailable" | ✅ |
 | Tutorial | ✅ (bundled) | ✅ |
 
@@ -352,8 +352,7 @@ We use the existing Next.js App Router. Each route is a thin client component th
 
 ## 10. Out of Scope (v1)
 
-- Accounts / authentication.
-- Cloud sync of profile and settings.
+- Accounts / authentication (Phase K). Until then, `userId === deviceId`, so cloud sync is effectively a per-device backup rather than true cross-device sync.
 - Spectator mode and replays.
 - Matchmaking / leaderboards.
 - iOS native shell (Capacitor) — kept as a follow-up if the PWA proves insufficient.
