@@ -232,6 +232,7 @@ export function Settings() {
               type="checkbox"
               checked={form.againstView}
               onChange={(e) => patch({ againstView: e.target.checked })}
+              aria-label="Against view"
             />
             <span className={styles.slider} aria-hidden />
           </label>
@@ -250,6 +251,7 @@ export function Settings() {
               type="checkbox"
               checked={form.walls}
               onChange={(e) => patch({ walls: e.target.checked })}
+              aria-label="Walls"
             />
             <span className={styles.slider} aria-hidden />
           </label>
