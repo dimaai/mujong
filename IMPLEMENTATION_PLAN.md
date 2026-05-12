@@ -658,10 +658,10 @@ These are listed so reviewers see the shape of the work. They are **not** approv
 - J-4 *(scheduled as Step 26)* Backend: Azure Static Web Apps managed Function `api/sync/{userId}/{kind}` backed by Azure Table Storage. LWW enforced server-side; `409` on stale `PUT`.
 - J-5 *(shipped as Step 27)* Reconcile on app start and on `online` event; surface a tiny "Synced · just now" indicator in Settings.
 
-**Phase L — Production hardening & a11y** *(proposed)*
-- L-1 *(proposed as Step 31)* PWA install affordance — `beforeinstallprompt` pill + iOS Add-to-Home-Screen hint.
-- L-2 *(proposed as Step 32)* Service-worker update prompt so a redeploy doesn't strand users on a stale cache.
-- L-3 *(proposed as Step 33)* Root React error boundary + opt-in client error log endpoint.
+**Phase L — Production hardening & a11y** *(in progress)*
+- L-1 *(shipped as Step 31)* PWA install affordance — `beforeinstallprompt` pill + iOS Add-to-Home-Screen hint.
+- L-2 *(shipped as Step 32)* Service-worker update prompt so a redeploy doesn't strand users on a stale cache.
+- L-3 *(shipped as Step 33)* Root React error boundary + opt-in client error log endpoint.
 - L-4 *(proposed as Step 34)* Board + menus keyboard / screen-reader pass; `prefers-reduced-motion` respect.
 
 ---

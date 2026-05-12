@@ -14,6 +14,7 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { SyncBootstrap } from './SyncBootstrap';
 import { UpdateToast } from '../components/PwaUpdate/UpdateToast';
+import { ErrorBoundary } from '../components/ErrorBoundary/ErrorBoundary';
 
 /**
  * metadata is a Next.js App Router convention.
@@ -101,7 +102,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
          * bundle. Renders nothing when no update is pending.
          */}
         <UpdateToast />
-        {children}
+        {/*
+         * ErrorBoundary (Step 33) catches render-time errors in
+         * the page subtree and swaps it for a friendly fallback
+         * instead of letting the user see a blank screen. The
+         * SyncBootstrap + UpdateToast above sit outside the
+         * boundary on purpose — they render nothing and have
+         * their own internal try/catch via React/SW APIs, so a
+         * crash there shouldn't take down the recovery UI.
+         */}
+        <ErrorBoundary>{children}</ErrorBoundary>
       </body>
     </html>
   );
