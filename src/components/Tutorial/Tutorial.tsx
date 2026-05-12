@@ -23,7 +23,25 @@ import { FIGURE_TYPES } from '../../data/figuretypes';
 import type { MovementRules } from '../../domain/types';
 import { FigureIcon } from '../figures/FigureIcon';
 
+import crossMoves from '../../app/tutorial/moves/cross_moves.jpg';
+import jumperMoves from '../../app/tutorial/moves/jumper_moves.jpg';
+import runnerMoves from '../../app/tutorial/moves/runner_moves.jpg';
+import slonMoves from '../../app/tutorial/moves/slon_moves.jpg';
+
 import styles from './Tutorial.module.css';
+
+// Map figure type id → move-diagram screenshot. Webpack resolves each
+// import to a StaticImageData object exposing `.src`; we use a plain
+// <img> rather than next/image because next.config.ts uses
+// `output: 'export'`, which is incompatible with the default image
+// optimizer at runtime.
+type StaticImg = { src: string; width: number; height: number };
+const MOVE_DIAGRAMS: Record<string, StaticImg> = {
+  ft_slon: slonMoves,
+  ft_runner: runnerMoves,
+  ft_cross: crossMoves,
+  ft_jumper: jumperMoves,
+};
 
 // Neutral preview color — the tutorial isn't tied to a player's
 // chosen accent, so we pick something that reads well against the
@@ -111,28 +129,44 @@ export function Tutorial() {
           <section className={styles.section}>
             <h2 className={styles.sectionTitle}>Pieces</h2>
             <div className={styles.pieceList}>
-              {FIGURE_TYPES.map((ft) => (
-                <div key={ft.id} className={styles.pieceRow}>
-                  <div className={styles.pieceIcon}>
-                    <FigureIcon
-                      figureTypeId={ft.id}
-                      color={PREVIEW_COLOR}
-                      size={48}
-                    />
-                  </div>
-                  <div className={styles.pieceText}>
-                    <div className={styles.pieceName}>{ft.name}</div>
-                    <div className={styles.pieceMovement}>
-                      {describeMovement(ft.movement)}
-                    </div>
-                    {ft.canJump && (
-                      <div className={styles.pieceJump}>
-                        Can jump over other pieces.
+              {FIGURE_TYPES.map((ft) => {
+                const diagram = MOVE_DIAGRAMS[ft.id];
+                return (
+                  <div key={ft.id} className={styles.pieceRow}>
+                    <div className={styles.pieceHeader}>
+                      <div className={styles.pieceIcon}>
+                        <FigureIcon
+                          figureTypeId={ft.id}
+                          color={PREVIEW_COLOR}
+                          size={48}
+                        />
                       </div>
+                      <div className={styles.pieceText}>
+                        <div className={styles.pieceName}>{ft.name}</div>
+                        <div className={styles.pieceMovement}>
+                          {describeMovement(ft.movement)}
+                        </div>
+                        {ft.canJump && (
+                          <div className={styles.pieceJump}>
+                            Can jump over other pieces.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    {diagram && (
+                      <img
+                        src={diagram.src}
+                        width={diagram.width}
+                        height={diagram.height}
+                        alt={`${ft.name} move diagram`}
+                        className={styles.pieceDiagram}
+                        loading="lazy"
+                        decoding="async"
+                      />
                     )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </section>
 
