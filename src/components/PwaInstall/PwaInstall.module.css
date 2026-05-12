@@ -1,0 +1,89 @@
+/* PwaInstall.module.css
+   Styling for the Step 31 install affordances:
+     - .pill           : compact "Install Mojong" button shown above
+                        the MainMenu actions when canInstall is true.
+     - .hintBackdrop   : full-viewport scrim for the iOS modal.
+     - .hintCard       : glass card matching MainMenu's aesthetic.
+     - .hintActions    : button row inside the card. */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: center;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, #7c3aed, #4f46e5);
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.35);
+}
+
+.pill:hover {
+  filter: brightness(1.08);
+}
+
+.pillIcon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.hintBackdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(10, 6, 20, 0.65);
+  backdrop-filter: blur(4px);
+  z-index: 100;
+}
+
+.hintCard {
+  max-width: 340px;
+  width: 100%;
+  padding: 22px 24px;
+  background: rgba(30, 20, 55, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  color: #ece4ff;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+
+.hintTitle {
+  margin: 0 0 10px 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.hintBody {
+  margin: 0 0 16px 0;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: #d6cdee;
+}
+
+.hintBody strong {
+  color: #fff;
+}
+
+.hintActions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.hintDismiss {
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, #7c3aed, #4f46e5);
+  border: 0;
+  border-radius: 9px;
+  cursor: pointer;
+}

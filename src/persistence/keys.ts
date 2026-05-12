@@ -26,6 +26,12 @@ export const STORAGE_KEYS = {
    * reload: code + role + own auth token. Cleared on session end.
    */
   netSession: "mojong.netSession.v1",
+  /**
+   * "1" once the user has dismissed the iOS "Add to Home Screen"
+   * hint (Step 31). Stored as a plain string (not an envelope)
+   * because it's a single boolean flag with no sync need.
+   */
+  installHintDismissed: "mojong.installHintDismissed.v1",
 } as const;
 
 /** Union of valid key strings — handy for typing helpers. */

@@ -31,6 +31,8 @@ import { useRouter } from 'next/navigation';
 import { useProfileStore, useProfileHydrated } from '../../store/profileStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { useGameStore, getResumableSnapshotMeta } from '../../store/gameStore';
+import { InstallPill } from '../PwaInstall/InstallPill';
+import { InstallHintIOS } from '../PwaInstall/InstallHintIOS';
 
 import styles from './MainMenu.module.css';
 
@@ -222,6 +224,11 @@ export function MainMenu() {
         </div>
 
         <div className={styles.buttons}>
+          {/* PWA install pill (Step 31). Renders only when the
+              browser fired `beforeinstallprompt` and we're not
+              already in standalone mode — see usePwaInstall. */}
+          <InstallPill />
+
           <button
             type="button"
             className={styles.startButton}
@@ -256,6 +263,12 @@ export function MainMenu() {
           </button>
         </div>
       </div>
+
+      {/* iOS-Safari install hint (Step 31). Self-gates on device,
+          standalone-mode, and a one-shot dismissal flag, so it
+          renders nothing on other platforms or after the first
+          acknowledgement. */}
+      <InstallHintIOS />
     </div>
   );
 }

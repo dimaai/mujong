@@ -465,7 +465,7 @@ What landed deviates from the plan above. Capturing the delta so a future contri
    - **Wire contract:** `GET /api/sync/{userId}/{kind}` returns `Persisted<T> | null`; `PUT /api/sync/{userId}/{kind}` accepts a `Persisted<T>`, returns `200` on accept or `409 { current: Persisted<T> }` if the server has a newer `updatedAt`. Client handles `409` by feeding `current` into `reconcile` from Step 24 and re-`PUT`-ing the winner. Bounded to 3 attempts before surfacing `SyncStaleError`.
    - **Debounce.** A single `setTimeout(1000)` per kind, cancelled by subsequent writes; flushes immediately on `beforeunload`.
    - **Online/offline.** `navigator.onLine === false` short-circuits to `SyncOfflineError` and flips `syncStore.status = 'offline'`; on `online` event, a one-shot `pull(kind)` per kind re-runs to recover any divergence.
-   - **userId.** Pulled from `getUserId()` (Step 1). For v1 it equals `deviceId` so two devices have *different* userIds and don't sync with each other — that's correct until Phase K introduces auth.
+   - **userId.** Pulled from `getUserId()` (Step 1). For v1 it equals `deviceId` so two devices have *different* userIds and don't sync with each other — that's intentional. Cross-device sync would require authentication, which is explicitly deferred (see optional Phase Z at the bottom of this document).
    - **The backend Function does not exist yet.** Step 25 ships against a Vite-only mock in tests + a `process.env.NEXT_PUBLIC_SYNC_BASE_URL` toggle so the real call can be disabled until Step 26 lands the server. Default in production: feature flag off.
 4. **STOP condition:** With the feature flag on and a mock `/api/sync/*` returning `null` (i.e. empty server): changing a name in MainMenu causes a `PUT` within ~1 s, visible in DevTools Network. Pre-seeding the mock with a newer envelope then reloading the page hydrates `useProfileStore` from the server. Killing the network → indicator flips to "Offline"; re-enabling triggers a `pull`. All new unit tests pass; existing stores' behaviour is unchanged when the feature flag is off.
 
@@ -485,7 +485,7 @@ What landed deviates from the plan above. Capturing the delta so a future contri
      - body strictly older → no write, return `409 { current: <stored envelope> }`.
      - tie → tie-break by `deviceId` lexicographically (same rule as the client kernel) so two devices that write at the exact same ms still converge.
      - schema-version mismatch → the higher `v` always wins, regardless of `updatedAt` — exactly as the kernel does.
-   - **Authentication** is intentionally *out of scope*: v1 trusts the `userId` path segment because `userId === deviceId` until Phase K lands. We add a short comment in `syncGet.ts` / `syncPut.ts` marking this and a `// TODO(K-1)` linking to Phase K so the gap is impossible to miss.
+   - **Authentication** is intentionally *out of scope* and stays that way for v1: the API trusts the `userId` path segment because `userId === deviceId`. Cross-device sync is deferred (see optional Phase Z); this is **not** a temporary gap. We add a short comment in `syncGet.ts` / `syncPut.ts` marking the trust boundary so a future contributor doesn't bolt on identity without re-reading Phase Z first.
    - **Validation at the boundary** (per copilot rules): reject `userId` / `kind` that don't match `/^[\w-]{1,64}$/` and `/^(profile|settings)$/` respectively with `400`. Reject bodies that aren't a valid `Persisted<T>` shape (missing fields, wrong types) with `400`. This is the only place we ever trust user input.
    - **Storage backend isolation.** Only `tableStore.ts` imports `@azure/data-tables`. The Function handlers depend on `SyncStore`, so unit tests use the in-memory variant with zero Azure dependencies — same pattern that worked for the signaling sessions module.
    - **No client changes.** Step 25 already speaks this contract; flipping the feature flag in Step 27 is what activates it.
@@ -504,10 +504,10 @@ What landed deviates from the plan above. Capturing the delta so a future contri
    - Manual QA matrix on the preview deploy:
      1. Single tab, change profile name → 1 s later DevTools shows a `PUT` returning 200.
      2. Reload the tab → `GET` returns the envelope; UI shows the same name.
-     3. Second tab on the same browser → `GET` returns the same envelope; edits in tab A reflect in tab B after the next reload (no live cross-tab broadcast — that's not in scope until Phase K).
+     3. Second tab on the same browser → `GET` returns the same envelope; edits in tab A reflect in tab B after the next reload (no live cross-tab broadcast — out of scope for v1).
      4. Kill the network in DevTools → indicator flips to "Offline" within ~1 s of the next edit.
      5. Restore network → an `online` event fires; the next `pull` succeeds; indicator returns to "Synced".
-4. **STOP condition:** All five QA scenarios pass on the SWA preview URL. `gh pr view` shows a green CI run. ARCHITECTURE §5.5 reflects the shipped state. Phase J is closed; the only remaining cross-device gap is Phase K (auth).
+4. **STOP condition:** All five QA scenarios pass on the SWA preview URL. `gh pr view` shows a green CI run. ARCHITECTURE §5.5 reflects the shipped state. Phase J is closed. (Cross-device sync remains an explicit non-goal for v1; see optional Phase Z.)
 
 ### Step 28 — Game snapshot persistence (Phase D-1)
 1. **Step name:** Persist `GameState` on every reducer action so a reload resumes mid-game.
@@ -550,7 +550,64 @@ What landed deviates from the plan above. Capturing the delta so a future contri
    - **No runtime code change** beyond metadata pointers. Bundle size impact is zero.
 4. **STOP condition:** Lighthouse PWA audit on the deployed preview is 100, with no "icon" or "splash" warnings. Adding the app to the iOS home screen shows the new tile; opening it shows the new splash. Adding it on Android shows the maskable icon clipped correctly. `npm run build` succeeds; `npm run type-check` and `npm run lint` pass.
 
+---
 
+## Proposed next 4 steps (after Step 30)
+
+> Status: **proposed, not yet approved.** Each entry is sized like the steps above (~150 LOC, ~3 files, one clear STOP). Order is suggested. All four form a new "Phase L — Production hardening & a11y" (see rollup below). Authentication is intentionally **not** in this batch — see the optional Phase Z at the bottom of this document for why it's deferred and what shipping it would look like.
+
+### Step 31 — PWA install affordance (Phase L-1)
+1. **Step name:** Give users a discoverable way to install the now-properly-iconed PWA on both Android/desktop Chrome and iOS Safari.
+2. **Files involved:**
+   - `src/hooks/usePwaInstall.ts` *(new — captures `beforeinstallprompt` and exposes `{ canInstall, promptInstall, isStandalone, isIOSSafari }`)*
+   - `src/components/PwaInstall/InstallPill.tsx` *(new — small "Install Mojong" button rendered only when `canInstall` is true)*
+   - `src/components/PwaInstall/InstallHintIOS.tsx` *(new — one-time iOS modal explaining "Tap Share → Add to Home Screen"; dismissal stored under a `mojong.installHintDismissed.v1` key)*
+   - [src/components/MainMenu/MainMenu.tsx](src/components/MainMenu/MainMenu.tsx) *(touch — render the pill above the action buttons; render the iOS hint on first visit only)*
+3. **What will be implemented:**
+   - Listen for `beforeinstallprompt`, call `e.preventDefault()`, stash the event in a ref, expose `promptInstall()` that calls `e.prompt()`. Hide the pill once installed (`appinstalled` event or `display-mode: standalone`).
+   - iOS Safari has no install event, so we detect `/iPad|iPhone|iPod/.test(navigator.userAgent) && !window.navigator.standalone` and show the hint exactly once (gated by the dismissal key).
+   - **Boundary discipline:** all `window` / `navigator` access lives in the hook, behind a `typeof window !== 'undefined'` check, so SSR/Next still renders cleanly.
+4. **STOP condition:** On Chrome desktop with the app eligible, the pill appears and clicking it shows the native install prompt; accepting it installs the app and the pill disappears. On iOS Safari, the hint modal shows on first visit and never again after dismissal. In an already-installed standalone window, neither surface renders. `npm run type-check` and `npm run lint` pass.
+
+### Step 32 — Service-worker update prompt (Phase L-2)
+1. **Step name:** When a new build is deployed, prompt the user to reload instead of leaving them on a stale cached bundle.
+2. **Files involved:**
+   - `src/hooks/useSwUpdate.ts` *(new — listens for `controllerchange` and `waiting` SW events; exposes `{ updateReady, applyUpdate }`)*
+   - `src/components/PwaUpdate/UpdateToast.tsx` *(new — bottom-of-screen toast: "New version available · Reload")*
+   - [src/app/layout.tsx](src/app/layout.tsx) *(touch — mount the toast next to `<SyncBootstrap />`)*
+   - [next.config.ts](next.config.ts) *(touch — confirm `@ducanh2912/next-pwa` is configured with `skipWaiting: false` so the user controls when the new SW activates)*
+3. **What will be implemented:**
+   - On `navigator.serviceWorker.ready`, watch `registration.waiting`; if present, set `updateReady = true`. Also handle the case where a new SW becomes waiting *while the tab is open* via `updatefound` → `statechange`.
+   - `applyUpdate()` posts `{ type: 'SKIP_WAITING' }` to `registration.waiting`, then reloads the page when `controllerchange` fires.
+   - Toast is dismissible (postpone) but reappears on the next route change so users don't get permanently stuck on the old bundle.
+4. **STOP condition:** Deploy build A, install/load it, deploy build B, reload once → toast appears within a few seconds; clicking "Reload" lands on build B (verified by a build-id meta tag or version string surfaced in Settings). `npm run build` succeeds; `npm run type-check` and `npm run lint` pass.
+
+### Step 33 — Root error boundary + opt-in client error log (Phase L-3)
+1. **Step name:** Replace the "white screen of death" risk with a friendly fallback and (optionally) ship the error to the API for diagnosis.
+2. **Files involved:**
+   - `src/components/ErrorBoundary/ErrorBoundary.tsx` *(new — class component implementing `componentDidCatch`; renders a fallback with a "Try again" button that resets state)*
+   - `src/components/ErrorBoundary/__tests__/ErrorBoundary.test.tsx` *(new — render a child that throws, assert the fallback shows; click "Try again", assert recovery)*
+   - [src/app/layout.tsx](src/app/layout.tsx) *(touch — wrap `{children}` in `<ErrorBoundary>`)*
+   - `api/src/functions/logError.ts` *(new, optional — accepts `{ message, stack, userId, deviceId, build, url }`; writes one row to a `clientErrors` table. Gated by `NEXT_PUBLIC_ERROR_LOG_URL`; absent flag → boundary still works, just doesn't report)*
+3. **What will be implemented:**
+   - The boundary catches **render-time** errors only (React's contract). Async errors stay the responsibility of their handlers; we don't add a global `window.onerror` hook in this step to keep scope tight.
+   - Fallback UI matches the existing glassy aesthetic and never references the technical error message (we log it, we don't expose it).
+   - When the env flag is set, the boundary `fetch`-POSTs the payload once per mount; failures to log are swallowed so a logging outage never blocks the UI.
+4. **STOP condition:** Forcing a throw in a child component shows the fallback; clicking "Try again" recovers. With the log endpoint configured locally, the POST is observable in the network tab and the row appears in Table Storage. `npm run type-check`, `npm run lint`, and the new boundary test pass.
+
+### Step 34 — Accessibility pass on board + menus (Phase L-4)
+1. **Step name:** Make the board and primary menus keyboard- and screen-reader-usable; respect `prefers-reduced-motion`.
+2. **Files involved:**
+   - [src/components/Board/Board.tsx](src/components/Board/Board.tsx) *(touch — arrow-key focus traversal between cells; Enter/Space activates the focused cell with the same handler as click; `role="grid"` + `aria-rowindex` / `aria-colindex` on each cell)*
+   - [src/components/MainMenu/MainMenu.tsx](src/components/MainMenu/MainMenu.tsx), [src/components/Settings/Settings.tsx](src/components/Settings/Settings.tsx) *(touch — confirm every interactive element has an accessible name; restore focus on route change)*
+   - [src/app/globals.css](src/app/globals.css) *(touch — `:focus-visible` ring; `@media (prefers-reduced-motion: reduce)` disables non-essential transitions)*
+   - `src/components/Board/__tests__/Board.a11y.test.tsx` *(new — render the board, fire arrow keys, assert the focus index advances; press Enter, assert the move handler fires)*
+3. **What will be implemented:**
+   - Roving-tabindex pattern on the board: exactly one cell has `tabIndex=0` at any time; arrow keys move it and call `focus()`.
+   - No new visual design — purely additive a11y semantics and the reduced-motion guard.
+4. **STOP condition:** Lighthouse Accessibility score ≥ 95 on `/`, `/play`, `/settings`. A full keyboard-only run (Tab from MainMenu → Start → arrow-key a move → Enter) plays a turn. Toggling the OS "reduce motion" setting disables the non-essential CSS transitions. `npm run type-check`, `npm run lint`, and the new a11y test pass.
+
+---
 
 These are listed so reviewers see the shape of the work. They are **not** approved yet and will be sliced into their own small steps when their turn comes. Order is suggested, not contractual.
 
@@ -589,10 +646,10 @@ These are listed so reviewers see the shape of the work. They are **not** approv
 - H-2 Reconnect overlay + grace timer.
 - H-3 Forfeit / claim-win flow per ARCHITECTURE §6.5.
 
-**Phase I — Polish**
-- I-1 Tutorial static page.
-- I-2 Delete old [GameSetup](src/components/GameSetup/GameSetup.tsx).
-- I-3 *(scheduled as Step 30)* Icon set finalisation, splash screens, theme polish.
+**Phase I — Polish** *(shipped)*
+- I-1 *(shipped)* Tutorial static page at [/tutorial](src/app/tutorial/page.tsx).
+- I-2 *(shipped)* Old `GameSetup` component deleted.
+- I-3 *(shipped as Step 30)* Icon set finalisation, splash screens, theme polish.
 
 **Phase J — Cloud sync for profile + settings (per ARCHITECTURE §5.5 / D-009)**
 - J-1 *(shipped as Step 24)* `src/sync/reconcile.ts` — last-write-wins kernel, pure logic.
@@ -601,9 +658,29 @@ These are listed so reviewers see the shape of the work. They are **not** approv
 - J-4 *(scheduled as Step 26)* Backend: Azure Static Web Apps managed Function `api/sync/{userId}/{kind}` backed by Azure Table Storage. LWW enforced server-side; `409` on stale `PUT`.
 - J-5 *(shipped as Step 27)* Reconcile on app start and on `online` event; surface a tiny "Synced · just now" indicator in Settings.
 
-**Phase K — Auth (optional, unlocks real cross-device sync)**
-- K-1 Add a Static Web Apps auth provider (Apple / Google) and exchange the session for a stable `userId`.
-- K-2 One-shot migration: copy blobs from the old anonymous `userId` to the new authenticated one on first sign-in.
+**Phase L — Production hardening & a11y** *(proposed)*
+- L-1 *(proposed as Step 31)* PWA install affordance — `beforeinstallprompt` pill + iOS Add-to-Home-Screen hint.
+- L-2 *(proposed as Step 32)* Service-worker update prompt so a redeploy doesn't strand users on a stale cache.
+- L-3 *(proposed as Step 33)* Root React error boundary + opt-in client error log endpoint.
+- L-4 *(proposed as Step 34)* Board + menus keyboard / screen-reader pass; `prefers-reduced-motion` respect.
+
+---
+
+## Phase Z — Authentication *(optional, deferred indefinitely)*
+
+**Status:** **not on the v1 roadmap.** The app is fully functional without it. This section exists only so a future contributor doesn't have to re-derive the design if the product decision changes.
+
+**Why it's deferred:**
+- Every feature shipped so far works anonymously. `userId === deviceId` (a per-device UUID from [src/persistence/ids.ts](src/persistence/ids.ts)) is enough to scope cloud sync per device, and the signaling service uses session codes, not identities.
+- The only thing auth unlocks is **same profile/settings following one human across multiple devices**. That's a nice-to-have, not a requirement — a returning user on the same device already sees their profile, settings, and resumable game.
+- Auth adds material complexity (provider config, account-deletion flow, privacy policy obligations, abuse handling) that we don't need to take on to ship a playable game.
+
+**If we ever do want it, the shape is:**
+- **Z-1 — Sign-in via Static Web Apps built-in auth.** Add Apple / Google providers in [staticwebapp.config.json](staticwebapp.config.json); read `/.auth/me` from a new `src/hooks/useAuth.ts`; when authenticated, rebase the sync subscriber's `userId` from `deviceId` to the auth provider's stable user id.
+- **Z-2 — Anonymous → authenticated migration.** New idempotent `POST /api/migrate` Function that copies `profile` + `settings` rows from `deviceId` to the authenticated `userId` if-and-only-if the destination is empty; sign-out reverts the client to the anonymous path. Shipped in the same PR as Z-1 so we never have an auth flow that orphans local data.
+- **Z-3 — Account deletion / sign-out hygiene.** A `DELETE /api/me` Function plus a Settings affordance, required for App Store / Play Store compliance the moment auth exists.
+
+Until somebody actually requests cross-device sync, Phase Z stays unscheduled — do **not** start it as a self-directed cleanup task.
 
 ---
 

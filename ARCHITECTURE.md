@@ -131,7 +131,7 @@ Two distinct ids; conflating them is the easy way to lose data:
 | Id | Lifetime | Purpose | Synced? |
 |---|---|---|---|
 | `deviceId` | Per install | Disambiguates which device wrote a revision; powers "this device vs others" UX | **No** — local only |
-| `userId` | Forever (or until sign-in) | Key under which cloud blobs live | Yes |
+| `userId` | Forever (anonymous; per-device) | Key under which cloud blobs live | Yes |
 
 Both are generated lazily on first run with `crypto.randomUUID()` and stored under `mojong.ids.v1`. Until accounts exist, `userId === deviceId`; "sync" is effectively a backup of this device. Adding any auth provider later promotes `userId` to a real cross-device key without touching the stores.
 
@@ -352,7 +352,7 @@ We use the existing Next.js App Router. Each route is a thin client component th
 
 ## 10. Out of Scope (v1)
 
-- Accounts / authentication (Phase K). Until then, `userId === deviceId`, so cloud sync is effectively a per-device backup rather than true cross-device sync.
+- Accounts / authentication. The app is fully functional without it: `userId === deviceId`, so cloud sync is per-device backup rather than cross-device sync. Cross-device sync would require auth, which is explicitly deferred — see [IMPLEMENTATION_PLAN.md “Phase Z”](IMPLEMENTATION_PLAN.md) for the deferred design.
 - Spectator mode and replays.
 - Matchmaking / leaderboards.
 - iOS native shell (Capacitor) — kept as a follow-up if the PWA proves insufficient.
