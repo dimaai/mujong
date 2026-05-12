@@ -469,9 +469,88 @@ What landed deviates from the plan above. Capturing the delta so a future contri
    - **The backend Function does not exist yet.** Step 25 ships against a Vite-only mock in tests + a `process.env.NEXT_PUBLIC_SYNC_BASE_URL` toggle so the real call can be disabled until Step 26 lands the server. Default in production: feature flag off.
 4. **STOP condition:** With the feature flag on and a mock `/api/sync/*` returning `null` (i.e. empty server): changing a name in MainMenu causes a `PUT` within ~1 s, visible in DevTools Network. Pre-seeding the mock with a newer envelope then reloading the page hydrates `useProfileStore` from the server. Killing the network → indicator flips to "Offline"; re-enabling triggers a `pull`. All new unit tests pass; existing stores' behaviour is unchanged when the feature flag is off.
 
----
+### Step 26 — Sync backend Function: `/api/sync/{userId}/{kind}`
+1. **Step name:** Server side of Phase J. Azure Static Web Apps managed Function backed by Azure Table Storage, mirroring the patterns already in [api/src/sessions/tableStore.ts](api/src/sessions/tableStore.ts).
+2. **Files involved:**
+   - `api/src/functions/syncGet.ts` *(new — HTTP-triggered `GET /sync/{userId}/{kind}`)*
+   - `api/src/functions/syncPut.ts` *(new — HTTP-triggered `PUT /sync/{userId}/{kind}`)*
+   - `api/src/sync/store.ts` *(new — `SyncStore` interface: `read(userId, kind)`, `write(userId, kind, envelope)`; pure, no Azure imports)*
+   - `api/src/sync/tableStore.ts` *(new — Azure Table-backed implementation; one table `mojongSync`, `PartitionKey = userId`, `RowKey = kind`, body stored as JSON column + `updatedAt` numeric column for the server-side LWW check)*
+   - `api/src/sync/defaultStore.ts` *(new — singleton chooser, in-memory in tests / locally, table-backed in production — same shape as `sessions/defaultStore.ts`)*
+   - `api/src/sync/__tests__/store.test.ts` *(new — table-driven: read-empty, write-then-read, stale-PUT returns conflict, schema-version guard mirrors client kernel)*
+   - [staticwebapp.config.json](staticwebapp.config.json) *(touch — only if SWA needs an explicit route for the new endpoints; usually `/api/*` blanket-routes already cover them)*
+3. **What will be implemented:**
+   - **Wire contract** matches Step 25 exactly: `GET` returns `Persisted<unknown> | null` (or `404` → client treats as null); `PUT` accepts a `Persisted<unknown>` body. Server compares `body.updatedAt` against the row's current `updatedAt`:
+     - body strictly newer → write, return `200`.
+     - body strictly older → no write, return `409 { current: <stored envelope> }`.
+     - tie → tie-break by `deviceId` lexicographically (same rule as the client kernel) so two devices that write at the exact same ms still converge.
+     - schema-version mismatch → the higher `v` always wins, regardless of `updatedAt` — exactly as the kernel does.
+   - **Authentication** is intentionally *out of scope*: v1 trusts the `userId` path segment because `userId === deviceId` until Phase K lands. We add a short comment in `syncGet.ts` / `syncPut.ts` marking this and a `// TODO(K-1)` linking to Phase K so the gap is impossible to miss.
+   - **Validation at the boundary** (per copilot rules): reject `userId` / `kind` that don't match `/^[\w-]{1,64}$/` and `/^(profile|settings)$/` respectively with `400`. Reject bodies that aren't a valid `Persisted<T>` shape (missing fields, wrong types) with `400`. This is the only place we ever trust user input.
+   - **Storage backend isolation.** Only `tableStore.ts` imports `@azure/data-tables`. The Function handlers depend on `SyncStore`, so unit tests use the in-memory variant with zero Azure dependencies — same pattern that worked for the signaling sessions module.
+   - **No client changes.** Step 25 already speaks this contract; flipping the feature flag in Step 27 is what activates it.
+4. **STOP condition:** `npm --prefix api test` green; new `store.test.ts` covers all four LWW cases. With the API running locally (`swa start`) and the client pointed at it (`NEXT_PUBLIC_SYNC_BASE_URL=http://localhost:4280/api/sync`), changing a profile name in one tab and reloading a second tab on the *same* device shows the updated name. Concurrent writes from two simulated devices (different `deviceId`s) converge after each side's next push. `npm run type-check` and `npm run lint` still pass; existing signaling endpoints continue to work (regression check).
 
-## Subsequent phases (for context only — not the next 5 steps)
+### Step 27 — Enable cloud sync in production + end-to-end smoke
+1. **Step name:** Flip the feature flag, verify on the deployed Static Web App, lock in the Phase J STOP condition from ARCHITECTURE §5.5 / D-009.
+2. **Files involved:**
+   - [.github/workflows/azure-static-web-apps-ci-cd.yml](.github/workflows/azure-static-web-apps-ci-cd.yml) *(touch — pass `NEXT_PUBLIC_SYNC_BASE_URL` to the Oryx build via `env:` on the deploy step. Default value: `/api/sync` for same-origin calls)*
+   - [src/components/Settings/SyncIndicator.tsx](src/components/Settings/SyncIndicator.tsx) *(touch — only if manual QA reveals copy/timing tweaks; otherwise no code change)*
+   - [README.md](README.md) *(touch — add a one-paragraph "Cloud sync" section pointing at the env var and Phase J behaviour)*
+   - [ARCHITECTURE.md](ARCHITECTURE.md) *(touch — flip the §5.5 / D-009 status note from "planned" to "shipped")*
+3. **What will be implemented:**
+   - No new code; this is the verification + documentation step that closes Phase J.
+   - The flag default in *local* development (`npm run dev`) stays `unset` so contributors don't accidentally talk to the production sync table. Local sync uses `swa start` per Step 26's instructions.
+   - Manual QA matrix on the preview deploy:
+     1. Single tab, change profile name → 1 s later DevTools shows a `PUT` returning 200.
+     2. Reload the tab → `GET` returns the envelope; UI shows the same name.
+     3. Second tab on the same browser → `GET` returns the same envelope; edits in tab A reflect in tab B after the next reload (no live cross-tab broadcast — that's not in scope until Phase K).
+     4. Kill the network in DevTools → indicator flips to "Offline" within ~1 s of the next edit.
+     5. Restore network → an `online` event fires; the next `pull` succeeds; indicator returns to "Synced".
+4. **STOP condition:** All five QA scenarios pass on the SWA preview URL. `gh pr view` shows a green CI run. ARCHITECTURE §5.5 reflects the shipped state. Phase J is closed; the only remaining cross-device gap is Phase K (auth).
+
+### Step 28 — Game snapshot persistence (Phase D-1)
+1. **Step name:** Persist `GameState` on every reducer action so a reload resumes mid-game.
+2. **Files involved:**
+   - [src/store/gameStore.ts](src/store/gameStore.ts) *(touch — wire `persist` middleware around the existing reducer slice; use the same envelope-aware storage adapter as Steps 2/3 so cloud-sync remains a future drop-in if we ever want resumable games across devices)*
+   - [src/persistence/keys.ts](src/persistence/keys.ts) *(touch — `STORAGE_KEYS.gameSnapshot` already exists; no change expected unless we need to bump the version)*
+   - `src/store/__tests__/gameStore.snapshot.test.ts` *(new — table-driven: action → reload → state preserved; finished-game snapshots are cleared on "New game")*
+   - `src/store/gameStore.ts` *(touch — explicit `clearSnapshot()` action invoked from "New game" / "Forfeit" / `endGame` paths so we don't resume into a terminal state)*
+3. **What will be implemented:**
+   - **Partialize carefully.** Only persist the fields that fully describe a resumable game: `board`, `currentPlayer`, `placements`, `clocks`, `actionLog`, `turnNumber`, `players`, `options`. Exclude `winner` and any transient UI flags — if `winner` is set we delete the snapshot instead.
+   - **Network mode rule.** Don't snapshot when `mode === 'network'` for v1. Resuming a peer-to-peer game after a reload is in Phase H's territory; mixing local-resume and network-rejoin paths now would couple two unrelated systems.
+   - **SSR safety.** Same hydration-flicker pattern Steps 2/3 already use: `useGameHydrated()` hook + a layout-stable placeholder on the `/play` route during the first paint.
+   - **Schema version.** Start at `v: 1`. Wire a `migrate` callback that returns `null` for unknown versions so a future shape change cleanly invalidates the saved game rather than corrupting it.
+4. **STOP condition:** Start a local game, make 3 moves, hard-reload the tab → board, clocks, and current player are identical. Finish the game → reload → MainMenu (no resume). `npm run type-check`, `npm run lint`, and the new `gameStore.snapshot.test.ts` pass; existing tests stay green.
+
+### Step 29 — "Resume game" banner on MainMenu (Phase D-2)
+1. **Step name:** Surface the snapshot from Step 28 as a one-click resume on the home screen.
+2. **Files involved:**
+   - [src/components/MainMenu/MainMenu.tsx](src/components/MainMenu/MainMenu.tsx) *(touch — render a banner above the action buttons when an unfinished snapshot exists)*
+   - [src/components/MainMenu/MainMenu.module.css](src/components/MainMenu/MainMenu.module.css) *(touch — banner styling: subtle, dismissible, fits the existing glassy aesthetic)*
+   - [src/store/gameStore.ts](src/store/gameStore.ts) *(touch — add a `hasResumableSnapshot()` selector that returns `true` only when `winner === null` AND `turnNumber > 0`)*
+   - `src/components/MainMenu/__tests__/MainMenu.resume.test.tsx` *(new — render with/without a snapshot; click "Resume" → router pushes `/play`; click "Discard" → snapshot cleared and banner disappears)*
+3. **What will be implemented:**
+   - **Three banner states:** none (no banner rendered), resumable (shows "Resume game · turn N"), finished (no banner — we cleared the snapshot in Step 28).
+   - **Two actions:** "Resume" navigates to `/play` without touching the snapshot (the `/play` route's existing rehydration takes over). "Discard" calls `clearSnapshot()` and re-renders without the banner.
+   - **No new persistence.** Everything reads from the Step 28 store; this is pure UI surfacing.
+4. **STOP condition:** Start a game, navigate back to MainMenu without finishing → banner appears showing the correct turn number. Click Resume → game continues from the snapshot. Restart, finish a game → no banner on the next MainMenu visit. Banner test passes; `npm run type-check` and `npm run lint` pass.
+
+### Step 30 — Final icon set + splash screens (Phase I-3)
+1. **Step name:** Replace placeholder PWA assets with real ones; ship the maskable / Apple touch / splash matrix.
+2. **Files involved:**
+   - `public/images/icon-192.png`, `icon-512.png`, `icon-maskable-512.png` *(new — real assets; 192 and 512 are required by Android, the maskable variant lets Android crop without clipping)*
+   - `public/images/apple-touch-icon-180.png` *(new — Apple home-screen tile)*
+   - `public/images/apple-splash-*.png` *(new — at least the iPhone 14 / 14 Pro Max / 12-mini sizes; full matrix can be generated from one master via a build-time script if it grows)*
+   - [public/manifest.webmanifest](public/manifest.webmanifest) *(touch — point each `icons[]` entry at the new files and set `purpose: 'any maskable'` on the maskable variant)*
+   - [src/app/layout.tsx](src/app/layout.tsx) *(touch — `metadata.icons.apple` and `appleWebApp.startupImage` point at the new files)*
+   - `README.md` *(touch — short "Generating PWA assets" section explaining how to regenerate the set from a master SVG so we don't lose the recipe)*
+3. **What will be implemented:**
+   - One master SVG (`public/images/logo-master.svg`) + a `scripts/generate-pwa-icons.mjs` Node script that emits every required PNG via `sharp`. Script is dev-time only; production build pulls the pre-committed PNGs.
+   - **No runtime code change** beyond metadata pointers. Bundle size impact is zero.
+4. **STOP condition:** Lighthouse PWA audit on the deployed preview is 100, with no "icon" or "splash" warnings. Adding the app to the iOS home screen shows the new tile; opening it shows the new splash. Adding it on Android shows the maskable icon clipped correctly. `npm run build` succeeds; `npm run type-check` and `npm run lint` pass.
+
+
 
 These are listed so reviewers see the shape of the work. They are **not** approved yet and will be sliced into their own small steps when their turn comes. Order is suggested, not contractual.
 
@@ -487,8 +566,8 @@ These are listed so reviewers see the shape of the work. They are **not** approv
 - C-4 `Difficulty` → piece roster mapping replaces `Level.allowedFigures`.
 
 **Phase D — In-progress game persistence**
-- D-1 Snapshot `GameState` to local storage on each `executeAction`.
-- D-2 "Resume game" banner on MainMenu.
+- D-1 *(scheduled as Step 28)* Snapshot `GameState` to local storage on each `executeAction`.
+- D-2 *(scheduled as Step 29)* "Resume game" banner on MainMenu.
 
 **Phase E — Net adapter scaffolding (offline-friendly)**
 - E-1 `src/net/protocol.ts` — message types and `seq` helpers.
@@ -513,14 +592,14 @@ These are listed so reviewers see the shape of the work. They are **not** approv
 **Phase I — Polish**
 - I-1 Tutorial static page.
 - I-2 Delete old [GameSetup](src/components/GameSetup/GameSetup.tsx).
-- I-3 Icon set finalisation, splash screens, theme polish.
+- I-3 *(scheduled as Step 30)* Icon set finalisation, splash screens, theme polish.
 
 **Phase J — Cloud sync for profile + settings (per ARCHITECTURE §5.5 / D-009)**
-- J-1 `src/sync/syncClient.ts` — `pull(kind)`, `push(kind, envelope)`, `reconcile(kind)` implementing last-write-wins by `updatedAt`. Pure logic; backend client injected.
-- J-2 `src/sync/httpClient.ts` — fetch wrapper for `GET/PUT /sync/:userId/:kind`, with debounce (1 s) and online/offline awareness.
-- J-3 Wire `useProfileStore` and `useSettingsStore` to the sync client via a single Zustand `subscribe` listener — no store internals change.
-- J-4 Backend: Azure Static Web Apps managed Function `api/sync/{userId}/{kind}` backed by Azure Table Storage. LWW enforced server-side; `409` on stale `PUT`.
-- J-5 Reconcile on app start and on `online` event; surface a tiny "Synced · just now" indicator in Settings.
+- J-1 *(shipped as Step 24)* `src/sync/reconcile.ts` — last-write-wins kernel, pure logic.
+- J-2 *(shipped as Step 25)* `src/sync/httpClient.ts` — fetch wrapper for `GET/PUT /sync/:userId/:kind`, with debounce (1 s) and online/offline awareness.
+- J-3 *(shipped as Step 25)* Wire `useProfileStore` and `useSettingsStore` to the sync client via a single Zustand `subscribe` listener — no store internals change.
+- J-4 *(scheduled as Step 26)* Backend: Azure Static Web Apps managed Function `api/sync/{userId}/{kind}` backed by Azure Table Storage. LWW enforced server-side; `409` on stale `PUT`.
+- J-5 *(scheduled as Step 27)* Reconcile on app start and on `online` event; surface a tiny "Synced · just now" indicator in Settings.
 
 **Phase K — Auth (optional, unlocks real cross-device sync)**
 - K-1 Add a Static Web Apps auth provider (Apple / Google) and exchange the session for a stable `userId`.

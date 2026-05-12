@@ -22,6 +22,14 @@ jobs:
       - name: Build And Deploy
         id: builddeploy
         uses: Azure/static-web-apps-deploy@v1
+        env:
+          # Cloud sync feature flag (Phase J / IMPLEMENTATION_PLAN Step 27).
+          # Same-origin path: the deployed SWA serves the API under /api,
+          # so the browser issues `GET/PUT /api/sync/{userId}/{kind}` without
+          # any cross-origin hop. Local development leaves this unset so
+          # `next dev` does not accidentally talk to the production table —
+          # use `swa start` + an explicit `.env.local` override instead.
+          NEXT_PUBLIC_SYNC_BASE_URL: "/api/sync"
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_ASHY_FIELD_01F6A1403 }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}

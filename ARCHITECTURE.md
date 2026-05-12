@@ -147,6 +147,11 @@ Both are generated lazily on first run with `crypto.randomUUID()` and stored und
 
 ### 5.5 Cloud sync algorithm (Phase J)
 
+**Status: shipped.** Client kernel, HTTP transport, and the
+Azure Table-backed Function endpoint are all live; the
+`NEXT_PUBLIC_SYNC_BASE_URL` flag is set to `/api/sync` in the
+deployed Static Web App.
+
 Last-write-wins per blob, keyed by `updatedAt`. Stateless, idempotent, runs on app start and on every cloud-eligible write while online:
 
 ```
