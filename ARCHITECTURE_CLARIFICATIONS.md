@@ -50,6 +50,26 @@ Decisions explicitly made, plus open questions that need confirmation before the
 - **Implementation:** the envelope and id generation land in Step 1 of the implementation plan (cheap, future-proof). The sync client + backend are deferred to **Phase J**, after the offline-first slice is shipped.
 - **Why LWW per blob, not CRDT:** payloads are tiny, single-user, low-frequency. Whole-blob LWW is dramatically simpler and loses no data in realistic scenarios.
 
+### D-010 Function App deploy — managed identity + public network access required (2026-05-12)
+- **Decision:** the standalone Function App (`mojong-signaling-api`, Flex Consumption, West Europe) authenticates to its runtime storage account (`mojongsignaling`) via **system-assigned managed identity**, never via shared keys. The storage account therefore keeps `allowSharedKeyAccess = false`, but **must keep `publicNetworkAccess = Enabled`** so GitHub-hosted runners can upload deploy packages.
+- **Required app settings** (already on the Function App; do not remove):
+  - `AzureWebJobsStorage__blobServiceUri  = https://mojongsignaling.blob.core.windows.net`
+  - `AzureWebJobsStorage__queueServiceUri = https://mojongsignaling.queue.core.windows.net`
+  - `AzureWebJobsStorage__tableServiceUri = https://mojongsignaling.table.core.windows.net`
+  - `AzureWebJobsStorage__credential       = managedidentity`
+  - `MOJONG_TABLES_ENDPOINT                = https://mojongsignaling.table.core.windows.net` (used by `api/src/sessions/defaultStore.ts` and `api/src/sync/defaultStore.ts` to pick the AAD-backed Table store)
+- **Required RBAC** (system-assigned MI on the Function App, principalId `1f96a8eb-c856-49ff-bdb6-700fea7a21a9` at the time of writing):
+  - `Storage Blob Data Owner` on the storage account
+  - `Storage Table Data Contributor` on the storage account
+  - `Storage Queue Data Contributor` on the storage account
+- **Common failure mode:** if a deploy fails with `Neither AzureWebJobsStorage nor AzureWebJobsStorage__accountName exist in app settings` AND/OR `Failed to deploy web package`, the cause is almost always `publicNetworkAccess = Disabled` on `mojongsignaling`. The error message is misleading — the runtime *does* have valid managed-identity settings; the upload path itself just cannot reach the deployment-storage container from the public runner. Fix:
+  ```pwsh
+  az storage account update --name mojongsignaling --resource-group mojong --public-network-access Enabled
+  ```
+  Then re-run the workflow (`gh run rerun <id>`). Do **not** add a shared-key connection string as a workaround — `allowSharedKeyAccess = false` will reject it at runtime even if the deploy validator accepts it.
+- **Why we live with public access:** only `audit`-effect policies flag this; nothing enforces it back to Disabled. The security gate is shifted to MI-only auth + Defender data scanning, not network isolation. If we ever need network isolation, the proper path is a self-hosted runner inside a VNet that has a private endpoint to `mojongsignaling`; that's a Phase-K-or-later decision.
+- **Why the `AzureWebJobsStorage` warning in the deploy log is safe to ignore:** the GitHub Action checks for the legacy connection-string-form setting. Flex Consumption uses the URI-form (`__blobServiceUri` + `__credential`) which the action doesn't recognise as equivalent. The Functions host honours both; the warning is cosmetic.
+
 ---
 
 ## Open questions (need confirmation)
