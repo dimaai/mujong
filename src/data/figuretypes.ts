@@ -47,8 +47,8 @@ export const FIGURE_TYPES: FigureType[] = [
     canJump: false,
   },
   {
-    id: 'ft_ziraf',
-    name: 'Ziraf',
+    id: 'ft_jumper',
+    name: 'Jumper',
     // Moves up to 2 vertical orI 1 horizontal AND can jump over pieces.
     // Useful for escaping tight situations where other pieces are blocked.
     movement: { vertical: 0, horizontal: 0, diagonal: 2 },
@@ -89,13 +89,13 @@ const ROSTER_BY_DIFFICULTY: Record<Difficulty, AllowedFigure[]> = {
     { figureTypeId: 'ft_slon', quantity: 2 },
     { figureTypeId: 'ft_runner', quantity: 2 },
     { figureTypeId: 'ft_cross', quantity: 1 },
-    { figureTypeId: 'ft_ziraf', quantity: 0 },
+    { figureTypeId: 'ft_jumper', quantity: 0 },
   ],
   advanced: [
     { figureTypeId: 'ft_slon', quantity: 2 },
     { figureTypeId: 'ft_runner', quantity: 2 },
     { figureTypeId: 'ft_cross', quantity: 2 },
-    { figureTypeId: 'ft_ziraf', quantity: 2 },
+    { figureTypeId: 'ft_jumper', quantity: 2 },
   ],
 };
 

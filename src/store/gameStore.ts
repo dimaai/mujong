@@ -171,7 +171,7 @@ const DEFAULT_SKIN_MAP: Record<string, string> = {
   ft_slon: 'skin_default_blue',
   ft_runner: 'skin_default_blue',
   ft_cross: 'skin_default_blue',
-  ft_ziraf: 'skin_default_blue',
+  ft_jumper: 'skin_default_blue',
 };
 
 // ── Store shape ───────────────────────────────────────────────

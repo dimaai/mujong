@@ -20,7 +20,7 @@ const ICON_PATHS: Record<string, string> = {
   ft_slon: '/images/x.png',
   ft_runner: '/images/arrow.png',
   ft_cross: '/images/cross.png',
-  ft_ziraf: '/images/long_x.png',
+  ft_jumper: '/images/long_x.png',
 };
 
 // ── Component ─────────────────────────────────────────────────
