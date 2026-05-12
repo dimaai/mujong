@@ -13,6 +13,7 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { SyncBootstrap } from './SyncBootstrap';
+import { UpdateToast } from '../components/PwaUpdate/UpdateToast';
 
 /**
  * metadata is a Next.js App Router convention.
@@ -94,6 +95,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
          * NEXT_PUBLIC_SYNC_BASE_URL feature flag is unset.
          */}
         <SyncBootstrap />
+        {/*
+         * UpdateToast (Step 32) listens for waiting service
+         * workers and prompts the user to reload onto the new
+         * bundle. Renders nothing when no update is pending.
+         */}
+        <UpdateToast />
         {children}
       </body>
     </html>

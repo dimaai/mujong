@@ -34,13 +34,22 @@ const nextConfig: NextConfig = {
 // ReferenceError on every response — which silently broke fetch
 // interception (including signaling API calls). The static export
 // already precaches `index.html`, so we don't lose offline coverage.
+// Workbox config:
+//   skipWaiting: false  — new SWs sit in the `waiting` state until
+//                         the user clicks "Reload" in our UpdateToast
+//                         (Step 32). This avoids mid-game ChunkLoad
+//                         errors from a SW swapping precaches under
+//                         a still-loading page.
+//   clientsClaim: true — once we DO activate (via SKIP_WAITING),
+//                         the new SW claims all open tabs so the
+//                         post-reload page is controlled immediately.
 const withPWA = withPWAInit({
   dest: 'public',
   register: true,
   disable: process.env.NODE_ENV === 'development',
   dynamicStartUrl: false,
   workboxOptions: {
-    skipWaiting: true,
+    skipWaiting: false,
     clientsClaim: true,
   },
 });
