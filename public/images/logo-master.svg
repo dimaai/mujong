@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Master source for all Mojong PWA icons and splash screens.
+
+  Design notes:
+    - 1024×1024 square canvas.
+    - Brand background #0f172a matches the manifest `theme_color`.
+    - The "M" mark stays inside the central 80% safe zone so the same
+      raster works as both a regular icon (`purpose: any`) and as a
+      maskable icon (`purpose: maskable`) without Android cropping the
+      content.
+    - Pure path geometry (no <text>) so librsvg/sharp can rasterize it
+      without relying on system fonts.
+
+  Regenerate raster assets with: `npm run generate:pwa-icons`
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <rect width="1024" height="1024" fill="#0f172a"/>
+  <!--
+    "M" stroke. Endpoints stay between x=160..864 and y=220..820
+    (stroke-width=120 → half-width=60), comfortably inside the
+    102.4..921.6 maskable safe zone.
+  -->
+  <path d="M 220 760 L 220 280 L 512 640 L 804 280 L 804 760"
+        fill="none"
+        stroke="#dc2626"
+        stroke-width="120"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+  <!-- Small white accent echoing the wordmark's red brushstroke. -->
+  <circle cx="804" cy="760" r="34" fill="#f8fafc"/>
+</svg>

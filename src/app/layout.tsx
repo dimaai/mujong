@@ -29,12 +29,37 @@ export const metadata: Metadata = {
     capable: true,
     title: 'Mojong',
     statusBarStyle: 'black-translucent',
+    // Apple shows a startup image only when a `<link rel="apple-touch-startup-image">`
+    // matches the device's exact pixel size + DPR. Each entry below is paired with
+    // the matching media query for one common modern iPhone. Add more as needed —
+    // the matching PNG is produced by `scripts/generate-pwa-icons.mjs`.
+    startupImage: [
+      {
+        url: '/images/apple-splash-1290x2796.png',
+        media:
+          '(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3)',
+      },
+      {
+        url: '/images/apple-splash-1170x2532.png',
+        media:
+          '(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3)',
+      },
+      {
+        url: '/images/apple-splash-1080x2340.png',
+        media:
+          '(device-width: 360px) and (device-height: 780px) and (-webkit-device-pixel-ratio: 3)',
+      },
+    ],
   },
   icons: {
-    // Placeholder icons — to be replaced with real 192/512/maskable assets
-    // in Phase I-3. iOS uses apple-touch-icon for the Home Screen tile.
-    icon: '/images/logo.png',
-    apple: '/images/logo.png',
+    // Real PWA icon set generated from public/images/logo-master.svg via
+    // `npm run generate:pwa-icons` (Step 30). Android picks 192/512 from
+    // the manifest; iOS picks the apple-touch-icon from this `apple` field.
+    icon: [
+      { url: '/images/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/images/icon-512.png', sizes: '512x512', type: 'image/png' },
+    ],
+    apple: '/images/apple-touch-icon-180.png',
   },
 };
 
