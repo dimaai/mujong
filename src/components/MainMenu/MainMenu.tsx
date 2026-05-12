@@ -25,21 +25,14 @@
 
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { useProfileStore, useProfileHydrated } from '../../store/profileStore';
 import { useSettingsStore } from '../../store/settingsStore';
-import { useGameStore, hasGameSnapshot } from '../../store/gameStore';
+import { useGameStore, getResumableSnapshotMeta } from '../../store/gameStore';
 
 import styles from './MainMenu.module.css';
-
-// Module-level guard so auto-resume fires at most once per
-// page-module lifetime. A hard refresh reloads the module and
-// resets the flag — exactly the behaviour we want. Without this,
-// `router.push('/')` from anywhere else (e.g. after Exit Game)
-// could trigger another redirect on the next render.
-let autoResumeAttempted = false;
 
 /**
  * MainMenu — the home screen.
@@ -49,6 +42,8 @@ let autoResumeAttempted = false;
  * Side effects:
  *   - writes to useProfileStore on every name/color change
  *   - calls useGameStore.startGame() and router.push('/play') on Start
+ *   - on mount, reads `getResumableSnapshotMeta()` once so the
+ *     "Resume game" banner (Step 29) knows whether to render
  */
 export function MainMenu() {
   const router = useRouter();
@@ -64,21 +59,19 @@ export function MainMenu() {
   const options = useSettingsStore((s) => s.options);
 
   const startGame = useGameStore((s) => s.startGame);
-  const hydrateFromSnapshot = useGameStore((s) => s.hydrateFromSnapshot);
+  const clearSnapshot = useGameStore((s) => s.clearSnapshot);
 
-  // Auto-resume: on first MainMenu mount in this page-module
-  // lifetime, if a valid snapshot exists, hydrate it and jump
-  // straight to /play. The user will only ever see this menu
-  // when there's no game to resume (or after Exit/finish, which
-  // clear the snapshot via the gameStore subscriber).
+  // Resume banner state (Step 29). `null` = no banner; populated
+  // value = render banner with that turnNumber. We read once on
+  // mount in a useEffect (not during render) because
+  // `getResumableSnapshotMeta` touches localStorage and must run
+  // client-side only — SSR has no `window`.
+  const [resumeMeta, setResumeMeta] = useState<{ turnNumber: number } | null>(
+    null,
+  );
   useEffect(() => {
-    if (autoResumeAttempted) return;
-    autoResumeAttempted = true;
-    if (!hasGameSnapshot()) return;
-    if (hydrateFromSnapshot()) {
-      router.replace('/play');
-    }
-  }, [hydrateFromSnapshot, router]);
+    setResumeMeta(getResumableSnapshotMeta());
+  }, []);
 
   // Wait for the persisted profile to rehydrate before painting,
   // otherwise the user sees DEFAULT_PLAYER1/2 ("Player 1" / blue)
@@ -104,6 +97,39 @@ export function MainMenu() {
     router.push('/play');
   }
 
+  /**
+   * handleResume
+   *
+   * Purpose:      navigate to /play so its existing snapshot-
+   *               hydration path (Step 28) restores the game.
+   * Inputs:       none
+   * Outputs:      none
+   * Side effects: triggers a client-side route change.
+   *
+   * We deliberately do NOT call hydrateFromSnapshot() here. The
+   * /play page already does that on mount, and double-hydration
+   * would just re-stamp the same state.
+   */
+  function handleResume() {
+    router.push('/play');
+  }
+
+  /**
+   * handleDiscard
+   *
+   * Purpose:      drop the saved game so the banner disappears
+   *               and the next /play visit redirects home.
+   * Inputs:       none
+   * Outputs:      none
+   * Side effects: removes the localStorage envelope (via
+   *               gameStore.clearSnapshot) and re-renders without
+   *               the banner.
+   */
+  function handleDiscard() {
+    clearSnapshot();
+    setResumeMeta(null);
+  }
+
   // Pre-hydration we render the SAME DOM but invisible, so:
   //   - SSR HTML and the first client paint are byte-identical
   //     (no React hydration warning),
@@ -127,6 +153,30 @@ export function MainMenu() {
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src="/images/logo.png" alt="Mojong" className={styles.logo} />
+
+      {resumeMeta !== null && (
+        <div className={styles.resumeBanner} role="region" aria-label="Resume game">
+          <span className={styles.resumeText}>
+            Resume game · turn {resumeMeta.turnNumber}
+          </span>
+          <div className={styles.resumeActions}>
+            <button
+              type="button"
+              className={styles.resumeButton}
+              onClick={handleResume}
+            >
+              Resume
+            </button>
+            <button
+              type="button"
+              className={styles.discardButton}
+              onClick={handleDiscard}
+            >
+              Discard
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className={styles.form}>
         <div className={styles.field}>

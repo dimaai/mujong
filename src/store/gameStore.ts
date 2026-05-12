@@ -114,6 +114,40 @@ export function hasGameSnapshot(): boolean {
   return true;
 }
 
+/**
+ * Step 29: lightweight read-only descriptor of the persisted
+ * snapshot, surfaced by `MainMenu` so the "Resume game · turn N"
+ * banner can label itself without pulling the whole `GameState`
+ * into React state.
+ *
+ * Purpose: tell the UI whether a resumable game exists, and if
+ *          so what to display on the banner.
+ * Inputs:  none
+ * Outputs: `{ turnNumber }` for a valid resumable snapshot, or
+ *          `null` for "no banner". A snapshot is resumable iff
+ *          `phase === 'playing'` AND `turnNumber > 0` (the spec's
+ *          "winner === null AND turnNumber > 0" — `phase` is the
+ *          canonical winner flag in this codebase).
+ * Side fx: deletes stale (version mismatch / finished-state)
+ *          envelopes, same defensive cleanup as `hasGameSnapshot`.
+ */
+export function getResumableSnapshotMeta(): { turnNumber: number } | null {
+  const env = getEnvelope<GameState>(STORAGE_KEYS.gameSnapshot);
+  if (env === null) return null;
+  if (env.v !== SNAPSHOT_VERSION) {
+    removeItem(STORAGE_KEYS.gameSnapshot);
+    return null;
+  }
+  if (!env.data || env.data.phase !== 'playing') {
+    removeItem(STORAGE_KEYS.gameSnapshot);
+    return null;
+  }
+  if (typeof env.data.turnNumber !== 'number' || env.data.turnNumber <= 0) {
+    return null;
+  }
+  return { turnNumber: env.data.turnNumber };
+}
+
 // ── Position key for threefold-repetition ─────────────────────
 // Encodes whose turn it is + every placed figure's position into a
 // single comparable string. Two keys are equal ⟺ the board state
@@ -381,6 +415,17 @@ interface GameStore {
    *               deletes a stale/invalid snapshot on failure.
    */
   hydrateFromSnapshot: () => boolean;
+
+  /**
+   * Step 29: explicit "Discard" entry point from the MainMenu
+   * banner. Removes the persisted snapshot AND tears down any
+   * in-memory game so the next /play visit doesn't silently
+   * rehydrate via the auto-snapshot subscriber.
+   *
+   * Side effects: deletes `STORAGE_KEYS.gameSnapshot` and resets
+   *               the store to its initial empty shape.
+   */
+  clearSnapshot: () => void;
 }
 
 // ── Store implementation ──────────────────────────────────────
@@ -806,6 +851,22 @@ export const useGameStore = create<GameStore>((set, get) => ({
       validMoveTargets: [],
     });
     return true;
+  },
+
+  clearSnapshot: () => {
+    // Remove the on-disk envelope first so the auto-snapshot
+    // subscriber's `game === null` flush (which would also call
+    // removeItem) is purely idempotent. Then reset the store so
+    // any open /play tab redirects home via its `useEffect`.
+    removeItem(STORAGE_KEYS.gameSnapshot);
+    set({
+      game: null,
+      selectedInstanceId: null,
+      validMoveTargets: [],
+      mode: 'local',
+      localPlayerIndex: null,
+      actionLog: [],
+    });
   },
 }));
 

@@ -68,7 +68,7 @@ vi.hoisted(() => {
 
 import { STORAGE_KEYS } from '../../persistence/keys';
 import { getEnvelope, setItem } from '../../persistence/storage';
-import { hasGameSnapshot, useGameStore } from '../gameStore';
+import { getResumableSnapshotMeta, hasGameSnapshot, useGameStore } from '../gameStore';
 import type { GameOptions, GameState, Profile, TurnAction } from '../../domain/types';
 
 // ── Fixtures ──────────────────────────────────────────────────
@@ -257,5 +257,70 @@ describe('gameStore snapshot persistence (Step 28)', () => {
     expect(ok).toBe(false);
     expect(useGameStore.getState().game).toBeNull();
     expect(backing().has(STORAGE_KEYS.gameSnapshot)).toBe(false);
+  });
+});
+
+// ── Step 29 — Resume banner store hooks ───────────────────────
+
+describe('gameStore — Step 29 resume banner support', () => {
+  it('getResumableSnapshotMeta returns null when no snapshot exists', () => {
+    expect(getResumableSnapshotMeta()).toBeNull();
+  });
+
+  it('getResumableSnapshotMeta returns the snapshot turn number for a playing game', () => {
+    useGameStore.getState().startGame({ options: OPTIONS, profiles: PROFILES });
+    place(firstAvailable(0), 0, 8);
+    place(firstAvailable(1), 0, 0);
+    drainPendingTimers();
+
+    const liveTurn = useGameStore.getState().game!.turnNumber;
+    const meta = getResumableSnapshotMeta();
+    expect(meta).not.toBeNull();
+    expect(meta!.turnNumber).toBe(liveTurn);
+  });
+
+  it('getResumableSnapshotMeta returns null and wipes a finished-game envelope', () => {
+    // A finished game shouldn't have a snapshot in the first place
+    // (the auto-snapshot subscriber removes it), but we seed one
+    // directly to exercise the defensive cleanup branch.
+    setItem(STORAGE_KEYS.gameSnapshot, {
+      v: 1,
+      data: { phase: 'finished', turnNumber: 12 } as unknown as GameState,
+      updatedAt: Date.now(),
+      deviceId: 'test-device',
+    });
+    expect(backing().has(STORAGE_KEYS.gameSnapshot)).toBe(true);
+
+    expect(getResumableSnapshotMeta()).toBeNull();
+    expect(backing().has(STORAGE_KEYS.gameSnapshot)).toBe(false);
+  });
+
+  it('getResumableSnapshotMeta returns null when turnNumber <= 0', () => {
+    // Defensive guard: a malformed envelope with turnNumber === 0
+    // should not surface as resumable. The envelope itself stays
+    // on disk — it's not stale, just unusable for the banner.
+    setItem(STORAGE_KEYS.gameSnapshot, {
+      v: 1,
+      data: { phase: 'playing', turnNumber: 0 } as unknown as GameState,
+      updatedAt: Date.now(),
+      deviceId: 'test-device',
+    });
+    expect(getResumableSnapshotMeta()).toBeNull();
+  });
+
+  it('clearSnapshot removes the envelope and resets the in-memory game', () => {
+    useGameStore.getState().startGame({ options: OPTIONS, profiles: PROFILES });
+    place(firstAvailable(0), 0, 8);
+    drainPendingTimers();
+    expect(hasGameSnapshot()).toBe(true);
+    expect(useGameStore.getState().game).not.toBeNull();
+
+    useGameStore.getState().clearSnapshot();
+    drainPendingTimers();
+
+    expect(hasGameSnapshot()).toBe(false);
+    expect(backing().has(STORAGE_KEYS.gameSnapshot)).toBe(false);
+    expect(useGameStore.getState().game).toBeNull();
+    expect(getResumableSnapshotMeta()).toBeNull();
   });
 });

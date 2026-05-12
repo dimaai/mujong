@@ -134,3 +134,59 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ── Resume-game banner (Step 29) ─────────────────────────────
+   Sits above .form on the MainMenu when an in-progress snapshot
+   exists. Same glassy treatment as .form so the page reads as a
+   single composition. */
+
+.resumeBanner {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 340px;
+  padding: 14px 18px;
+  background: rgba(124, 58, 237, 0.12);
+  border: 1px solid rgba(124, 58, 237, 0.35);
+  border-radius: 14px;
+  backdrop-filter: blur(12px);
+}
+
+.resumeText {
+  font-size: 14px;
+  font-weight: 600;
+  color: #ece4ff;
+}
+
+.resumeActions {
+  display: flex;
+  gap: 8px;
+}
+
+.resumeButton {
+  flex: 1;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, #7c3aed, #4f46e5);
+  border: 0;
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.resumeButton:hover {
+  filter: brightness(1.08);
+}
+
+.discardButton {
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #d6cdee;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 9px;
+  cursor: pointer;
+}
